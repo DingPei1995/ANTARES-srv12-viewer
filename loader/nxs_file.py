@@ -66,15 +66,14 @@ Data "kinds" produced
 - ``"unsupported"``: case 1 (``Scan2D_MBS_vs_PIX_PIY``), left unimplemented
                    in the .m file too ("not finish for 2019 version").
 """
-from __future__ import annotations
 
 import os
 from contextlib import contextmanager
 import warnings
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 from typing import Optional
 
-import h5py
+from compat import h5 as h5py
 import numpy as np
 
 # --------------------------------------------------------------------------
@@ -128,7 +127,7 @@ GROUP_NAME_TO_CASE = {
 }
 
 
-def _classify_entry(f: h5py.File, g: str) -> Optional[int]:
+def _classify_entry(f, g):
     """Determine which parsing case (2, 3 or 4) the entry at group path
     ``g`` actually contains, by checking which datasets exist inside it --
     robust to arbitrary/reused entry names. Returns None if nothing
@@ -184,21 +183,21 @@ def _decode(x):
     return x
 
 
-def _read(f: h5py.File, path: str):
+def _read(f, path):
     """h5read-equivalent: read a dataset, decoding strings, tolerant of a
     trailing '/' (the .m file appends one after every path)."""
     path = path.rstrip("/")
     return _decode(f[path][()])
 
 
-def _read_opt(f: h5py.File, path: str, default=None):
+def _read_opt(f, path, default=None):
     path = path.rstrip("/")
     if path not in f:
         return default
     return _decode(f[path][()])
 
 
-def matlab_colon(start: float, step: float, stop: float) -> np.ndarray:
+def matlab_colon(start, step, stop):
     """Reproduce MATLAB's ``start:step:stop`` (inclusive of ``stop`` up to
     floating point tolerance). Defensively coerces its arguments to plain
     Python floats first -- see :func:`scalar0` for why that isn't always a
@@ -213,7 +212,7 @@ def matlab_colon(start: float, step: float, stop: float) -> np.ndarray:
     return start + step * np.arange(n)
 
 
-def scalar0(arr, name: str = "value") -> float:
+def scalar0(arr, name="value"):
     """Extract a single representative scalar from a calibration dataset,
     the way MATLAB's ``arr(1)`` linear indexing does regardless of the
     array's actual shape.
@@ -246,7 +245,7 @@ def scalar0(arr, name: str = "value") -> float:
     return float(v0)
 
 
-def squeeze_to_1d(arr, name: str = "array") -> np.ndarray:
+def squeeze_to_1d(arr, name="array"):
     """Collapse a nominally-1D scan-axis array (e.g. an actuator readback)
     to a true 1D array, tolerating harmless extra singleton dimensions
     (shape (N,1), (1,N), ...) that show up on some real files. Warns
@@ -284,7 +283,7 @@ INFO_FIELDS_HIDDEN = {
 INFO_PREFIXES_HIDDEN = ("User.", "TC1.", "TC2.", "ScanCfg.")
 
 
-def _hide_noisy_info(info: dict) -> dict:
+def _hide_noisy_info(info):
     return {k: v for k, v in info.items()
             if k not in INFO_FIELDS_HIDDEN and not k.startswith(INFO_PREFIXES_HIDDEN)}
 
@@ -298,7 +297,7 @@ ANGLE_UNIT = "\u00b0"
 ENERGY_UNIT = "eV"
 
 
-def spatial_unit_for(actuator_names) -> str:
+def spatial_unit_for(actuator_names):
     """Unit for the real-space scan axes, inferred from the actuator names
     recorded in ``scan_config/trajectory/actuator_*_1/name``.
 
@@ -312,8 +311,8 @@ def spatial_unit_for(actuator_names) -> str:
         return "\u00b5m"
     return "mm"
 # --------------------------------------------------------------------------
-def resolve_axis_order(shape, axis_lengths: "dict[str, int]", order: "list[str]",
-                       what: str = "array") -> "tuple[int, ...]":
+def resolve_axis_order(shape, axis_lengths, order,
+                       what="array"):
     """Work out which raw axis is which named axis, by matching lengths.
 
     Split out of :func:`align_and_transpose` so the same reasoning can be
@@ -367,7 +366,7 @@ class _HandleRegistry:
     def __init__(self):
         self._open = {}          # abspath -> [h5py.File, refcount]
 
-    def acquire(self, path: str) -> h5py.File:
+    def acquire(self, path):
         key = os.path.abspath(path)
         entry = self._open.get(key)
         if entry is not None and entry[0].id.valid:
@@ -377,7 +376,7 @@ class _HandleRegistry:
         self._open[key] = [handle, 1]
         return handle
 
-    def release(self, path: str, handle=None) -> None:
+    def release(self, path, handle=None):
         """Give back one claim on ``path``. ``handle`` is the File the claim
         was made on: if the registry has since had to replace it (it was
         found invalid), a release for the old one must not count against
@@ -396,15 +395,15 @@ class _HandleRegistry:
             except Exception:
                 pass
 
-    def open_count(self) -> int:
+    def open_count(self):
         """Number of files currently held open (used by the tests)."""
         return len(self._open)
 
-    def is_open(self, path: str) -> bool:
+    def is_open(self, path):
         return os.path.abspath(path) in self._open
 
     @contextmanager
-    def borrow(self, path: str):
+    def borrow(self, path):
         """``with HANDLES.borrow(path) as f:`` -- read a file *through* the
         registry for the length of a block.
 
@@ -441,7 +440,7 @@ class LazyCube:
     finished with (``NxsData`` does this).
     """
 
-    def __init__(self, dataset, perm: "tuple[int, ...]"):
+    def __init__(self, dataset, perm):
         self._dset = dataset
         self._perm = perm
         self.shape = tuple(dataset.shape[ax] for ax in perm)
@@ -482,14 +481,14 @@ class LazyCube:
         return np.transpose(data, [surviving_src.index(ax) for ax in wanted_src])
 
     @property
-    def size(self) -> int:
+    def size(self):
         return int(np.prod(self.shape)) if self.shape else 1
 
     @property
-    def nbytes(self) -> int:
+    def nbytes(self):
         return self.size * self.dtype.itemsize
 
-    def materialise(self) -> np.ndarray:
+    def materialise(self):
         """Read the whole cube into memory, in this object's axis order.
         Only for callers that genuinely need every point; everything in the
         GUI avoids this."""
@@ -535,7 +534,7 @@ class LazyArray:
     def __getitem__(self, key):
         return self._dset[key]
 
-    def materialise(self) -> np.ndarray:
+    def materialise(self):
         return self._dset[()]
 
     def __array__(self, dtype=None):
@@ -546,7 +545,7 @@ class LazyArray:
         return f"LazyArray(shape={self.shape}, dtype={self.dtype})"
 
 
-def align_and_transpose(arr: np.ndarray, axis_lengths: "dict[str, int]", order: "list[str]") -> np.ndarray:
+def align_and_transpose(arr, axis_lengths, order):
     """Reorder ``arr``'s axes to match ``order`` by matching each named
     axis's expected length (``axis_lengths[name]``) against ``arr.shape``.
 
@@ -565,7 +564,7 @@ def align_and_transpose(arr: np.ndarray, axis_lengths: "dict[str, int]", order: 
 # delivered in k by the MBS acquisition software, matching the .m file's own
 # "SPEM_kmin/kmax" naming for that axis).
 # --------------------------------------------------------------------------
-def deflector_angle_to_k(angle_deg: np.ndarray, kinetic_energy_eV) -> np.ndarray:
+def deflector_angle_to_k(angle_deg, kinetic_energy_eV):
     """Standard free-electron final-state small-angle ARPES conversion::
 
         k_parallel [A^-1] = 0.5123 * sqrt(KE[eV]) * sin(angle[rad])
@@ -672,14 +671,14 @@ KIND_LABELS = {
 }
 
 
-def axis_slots(kind: str, order: str = "array") -> tuple:
+def axis_slots(kind, order="array"):
     """The axis slot names for ``kind``; ``()`` for one with no plain
     axes-and-array form (``unsupported``). ``order`` is "array" or
     "constructor" -- see :data:`AXIS_SLOTS`."""
     return AXIS_SLOTS.get(kind, {}).get(order, ())
 
 
-def energy_slot(kind: str):
+def energy_slot(kind):
     """Which axis of ``kind`` is the energy, or ``None`` if it has none.
 
     Derived rather than tabulated. Energy is the last axis a dataset is
@@ -698,36 +697,36 @@ def energy_slot(kind: str):
 
 @dataclass
 class NxsScan:
-    kind: str                       # 'spem_4d' | 'spem_1d' | 'cut' | 'map' | 'unsupported'
-    filename_prefix: str = ""
-    info: dict = field(default_factory=dict)
-    fourd_info: dict = field(default_factory=dict)
+    kind: 'str'                       # 'spem_4d' | 'spem_1d' | 'cut' | 'map' | 'unsupported'
+    filename_prefix: 'str' = ""
+    info: 'dict' = field(default_factory=dict)
+    fourd_info: 'dict' = field(default_factory=dict)
 
     # axes (only the ones relevant to `kind` are populated)
-    x: Optional[np.ndarray] = None   # spatial x, or deflector angle (Map), or k/angle (Cut)
-    y: Optional[np.ndarray] = None   # spatial y, or analyzer k axis (Map), or Energy (Cut)
-    k: Optional[np.ndarray] = None   # analyzer momentum axis (spem_4d, map)
-    z: Optional[np.ndarray] = None   # Energy axis
-    kx: Optional[np.ndarray] = None  # converted deflector-angle -> k (map only, see .to_kspace())
+    x: 'Optional[np.ndarray]' = None   # spatial x, or deflector angle (Map), or k/angle (Cut)
+    y: 'Optional[np.ndarray]' = None   # spatial y, or analyzer k axis (Map), or Energy (Cut)
+    k: 'Optional[np.ndarray]' = None   # analyzer momentum axis (spem_4d, map)
+    z: 'Optional[np.ndarray]' = None   # Energy axis
+    kx: 'Optional[np.ndarray]' = None  # converted deflector-angle -> k (map only, see .to_kspace())
 
-    value: Optional[np.ndarray] = None     # main 2D/3D array for this `kind`
+    value: 'Optional[np.ndarray]' = None     # main 2D/3D array for this `kind`
     #: spem_4d only: the (y, x, k, E) cube. A :class:`LazyCube` reading from
     #: the still-open file, not a numpy array -- index it as usual.
-    value4d: object = None
+    value4d: 'object' = None
     #: spem_4d only: {name: (dataset, perm)} for the reduced preview cubes,
     #: left unread; see NxsData.spatial_overview.
-    previews: dict = field(default_factory=dict)
+    previews: 'dict' = field(default_factory=dict)
     #: open file handle when the scan reads lazily; released by close().
-    _h5file: object = None
+    _h5file: 'object' = None
     #: the path that handle belongs to, for releasing it in the registry.
-    _h5path: object = None
+    _h5path: 'object' = None
 
-    def axis_slots(self, order: str = "array") -> tuple:
+    def axis_slots(self, order="array"):
         """The names of the axis attributes this scan's dimensions live in
         (see :data:`AXIS_SLOTS`)."""
         return axis_slots(self.kind, order)
 
-    def axes(self, order: str = "array") -> list:
+    def axes(self, order="array"):
         """This scan's axis vectors, in the array's order.
 
         Asking the scan rather than looking the kind up in a table is what
@@ -764,7 +763,7 @@ class NxsScan:
     #: Display labels (including units) for each axis this scan populates,
     #: keyed 'x', 'y', 'k', 'z'. Filled by the parsers; the GUI uses these
     #: verbatim for its axis titles so units live in one place.
-    labels: dict = field(default_factory=dict)
+    labels: 'dict' = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -784,7 +783,7 @@ def _scalarize(value):
     return value
 
 
-def _read_group_fields(f: h5py.File, group_path: str, prefix: str, out: dict,
+def _read_group_fields(f, group_path, prefix, out,
                         skip=("controller_record",)):
     """Copy every scalar/string dataset directly under ``group_path`` into
     ``out`` as ``prefix.<field>``. Used instead of a hand-maintained field
@@ -815,7 +814,7 @@ def _read_group_fields(f: h5py.File, group_path: str, prefix: str, out: dict,
             out[f"{prefix}.{key}"] = f"<unreadable: {exc}>"
 
 
-def _read_common_info(f: h5py.File, g: str) -> dict:
+def _read_common_info(f, g):
     """Read the experiment metadata worth showing in the GUI's info table.
 
     Field selection follows what actually exists in these files (verified
@@ -896,7 +895,7 @@ SPATIAL_HORIZONTAL = ("st", "pix", "pi_x")
 SPATIAL_VERTICAL = ("sz", "piy", "pi_y")
 
 
-def _spatial_labels(f: h5py.File, g: str) -> "tuple[str, str, dict]":
+def _spatial_labels(f, g):
     """Axis titles for the two real-space scan axes, plus what they were
     called in the file.
 
@@ -932,7 +931,7 @@ def _spatial_labels(f: h5py.File, g: str) -> "tuple[str, str, dict]":
     return f"X ({unit})", f"Y ({unit})", detail
 
 
-def _motor_minus_offset(f: h5py.File, g: str, motor: str):
+def _motor_minus_offset(f, g, motor):
     pos = _read_opt(f, f"{g}/ANTARES/{motor}/position")
     off = _read_opt(f, f"{g}/ANTARES/{motor}/offset")
     if pos is None:
@@ -962,7 +961,7 @@ _MOTOR_GROUPS = [
 ]
 
 
-def _read_fourd_info(f: h5py.File, g: str) -> dict:
+def _read_fourd_info(f, g):
     """Motor positions (offset-corrected, as in the .m file). Also reads the
     fine piezo stage, whose real path (``i12-m-cx1-ex-pi/{x,y,z}``) the .m
     file guessed wrong and left commented out -- it stores x/y/z directly
@@ -980,7 +979,7 @@ def _read_fourd_info(f: h5py.File, g: str) -> dict:
     return out
 
 
-def _find_actuator_group(f: h5py.File, trajectory_path: str) -> str:
+def _find_actuator_group(f, trajectory_path):
     """Robust replacement for the .m file's fragile positional lookup
     (``hinfo.Groups.Groups(3).Groups.Groups.Name``): find an
     ``actuator_*_1`` subgroup under ``trajectory_path`` by name instead of
@@ -1000,7 +999,7 @@ def _find_actuator_group(f: h5py.File, trajectory_path: str) -> str:
 # --------------------------------------------------------------------------
 # Case 2: real-space (SPEM) scan
 # --------------------------------------------------------------------------
-def _parse_case2(f: h5py.File, g: str, is_zpalign: bool) -> NxsScan:
+def _parse_case2(f, g, is_zpalign):
     ds = f[f"{g}/scan_data/data_12"]
     if ds.ndim == 4:
         # NOT ds[()]: see LazyCube -- reading the whole cube here is what
@@ -1105,7 +1104,7 @@ def _parse_case2(f: h5py.File, g: str, is_zpalign: bool) -> NxsScan:
     return scan
 
 
-def _best_effort_transpose_3d(arr: np.ndarray, axis_lengths: dict) -> np.ndarray:
+def _best_effort_transpose_3d(arr, axis_lengths):
     """The .m file's ``data.value`` 3D preview cube isn't spelled out
     axis-by-axis; try the 3 most-likely orders against the known axis
     lengths and fall back to the raw array (with a warning) if none match
@@ -1130,7 +1129,7 @@ def _best_effort_transpose_3d(arr: np.ndarray, axis_lengths: dict) -> np.ndarray
 # --------------------------------------------------------------------------
 # Case 3 / 4: deflector-angle scan (k-space "Cut" or "Map")
 # --------------------------------------------------------------------------
-def _parse_case34(f: h5py.File, g: str, e_idx: tuple, x_idx: tuple, v_idx: str) -> NxsScan:
+def _parse_case34(f, g, e_idx, x_idx, v_idx):
     """``e_idx``/``x_idx`` are the ('data_NN','data_NN','data_NN') triplets
     for (escale) and (xscale) that differ between case 3 (01-03 / 04-06) and
     case 4 (04-06 / 07-09); ``v_idx`` is the value dataset name (data_09 /
@@ -1209,7 +1208,7 @@ def _parse_case34(f: h5py.File, g: str, e_idx: tuple, x_idx: tuple, v_idx: str) 
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
-def _entry_kind(f: h5py.File, g: str) -> Optional[str]:
+def _entry_kind(f, g):
     """Label one entry: "SPEM", "Cut", "Map", or None if unrecognised.
 
     Reads only the entry's structure and the *shape* of the deflector
@@ -1237,7 +1236,7 @@ def _entry_kind(f: h5py.File, g: str) -> Optional[str]:
     return None
 
 
-def _first_string(f: h5py.File, path: str) -> Optional[str]:
+def _first_string(f, path):
     """A short string dataset's value, or None if absent/unreadable."""
     try:
         if path not in f:
@@ -1250,7 +1249,7 @@ def _first_string(f: h5py.File, path: str) -> Optional[str]:
         return None
 
 
-def _parse_native(f: h5py.File, g: str) -> NxsScan:
+def _parse_native(f, g):
     """Read back an entry written by :func:`save_dataset`.
 
     Deliberately simple and self-describing: the axes, the cube, the axis
@@ -1311,96 +1310,197 @@ def _parse_native(f: h5py.File, g: str) -> NxsScan:
     return scan
 
 
-def save_dataset(path: str, datasets: "list[dict]", progress=None) -> None:
-    """Write datasets to a ``.nxs`` file this program can open again.
+#: The program's own saved format, from this version on: one ``.npz`` file
+#: (numpy's zip of arrays, compressed) holding every entry's arrays, plus a
+#: JSON document describing them. It replaced an HDF5 layout written with
+#: h5py, which the lab server does not have; ``.nxs`` files written by the
+#: earlier version are still *read* (see :func:`_parse_native`).
+NPZ_FORMAT = "arpes_viewer_npz"
+NPZ_META = "__meta__"
+NATIVE_EXTENSIONS = (".npz",)
+
+
+def _json_safe(value):
+    """A metadata value as something JSON can hold, without losing what the
+    information table shows."""
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        value = float(value)
+        return value if np.isfinite(value) else str(value)
+    if isinstance(value, (bytes, np.bytes_)):
+        return value.decode("utf-8", "replace")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, np.ndarray) and value.size <= 4096:
+        return [_json_safe(v) for v in value.reshape(-1).tolist()]
+    if isinstance(value, (list, tuple)) and len(value) <= 4096:
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def is_native_npz(path):
+    """True for a file written by :func:`save_dataset`."""
+    if not str(path).lower().endswith(NATIVE_EXTENSIONS):
+        return False
+    try:
+        return _read_npz_meta(path).get("format") == NPZ_FORMAT
+    except Exception:
+        return False
+
+
+def _read_npz_meta(path):
+    import json
+    with np.load(path, allow_pickle=False) as archive:
+        return json.loads(str(archive[NPZ_META][()]))
+
+
+class NpzArray:
+    """One array of a saved ``.npz`` file, read the first time it is
+    indexed and then kept. Shape and dtype come from the stored header, so a
+    listed dataset costs nothing until it is looked at."""
+
+    def __init__(self, path, key):
+        import zipfile
+        self._path, self._key = path, key
+        self._data = None
+        with zipfile.ZipFile(path) as archive:
+            with archive.open(key + ".npy") as fh:
+                version = np.lib.format.read_magic(fh)
+                if version == (1, 0):
+                    shape, _order, dtype = np.lib.format.read_array_header_1_0(fh)
+                else:
+                    shape, _order, dtype = np.lib.format.read_array_header_2_0(fh)
+        self.shape = tuple(shape)
+        self.dtype = np.dtype(dtype)
+        self.ndim = len(self.shape)
+        self.size = int(np.prod(self.shape)) if self.shape else 1
+        self.nbytes = self.size * self.dtype.itemsize
+
+    def materialise(self):
+        if self._data is None:
+            with np.load(self._path, allow_pickle=False) as archive:
+                self._data = archive[self._key]
+        return self._data
+
+    def __len__(self):
+        return self.shape[0] if self.shape else 0
+
+    def __getitem__(self, key):
+        return self.materialise()[key]
+
+    def __array__(self, dtype=None):
+        data = self.materialise()
+        return data if dtype is None else data.astype(dtype)
+
+    def __repr__(self):
+        return "NpzArray(shape=%s, dtype=%s)" % (self.shape, self.dtype)
+
+
+def _npz_entries(path):
+    meta = _read_npz_meta(path)
+    if meta.get("format") != NPZ_FORMAT:
+        raise ValueError("%s is not a file saved by this program" % path)
+    return meta.get("entries", [])
+
+
+def _parse_native_npz(path, entry=None):
+    entries = _npz_entries(path)
+    if not entries:
+        raise ValueError("%s holds no datasets" % path)
+    chosen = entries[0]
+    if entry is not None:
+        wanted = str(entry).lstrip("/")
+        for item in entries:
+            if item["entry"] == wanted or item.get("name") == wanted:
+                chosen = item
+                break
+        else:
+            raise KeyError("Entry %r not found in %s; available: %s" % (
+                entry, path, [e["entry"] for e in entries]))
+    key = chosen["entry"]
+    kind = str(chosen["kind"])
+    scan = NxsScan(kind=kind, filename_prefix="")
+    scan.value = NpzArray(path, key + ".value")
+    with np.load(path, allow_pickle=False) as archive:
+        axes = [np.asarray(archive["%s.axis_%s" % (key, name)], dtype=float)
+                for name in ("x", "y", "z", "w")[:int(chosen["n_axes"])]]
+    for slot, values in zip(axis_slots(kind, "constructor"), axes):
+        setattr(scan, slot, values)
+    if kind == "spem_4d":
+        scan.value4d = scan.value
+    scan.labels = {str(k): str(v) for k, v in (chosen.get("labels") or {}).items()}
+    scan.info.update(chosen.get("info") or {})
+    scan.fourd_info.update(chosen.get("motors") or {})
+    scan.info["_group"] = "/" + key
+    scan.info["_case"] = 5
+    if len(entries) > 1:
+        scan.info["_other_entries"] = [e["entry"] for e in entries if e is not chosen]
+    return scan
+
+
+def _list_native_npz(path):
+    out = []
+    try:
+        for item in _npz_entries(path):
+            out.append({"entry": item["entry"],
+                        "kind": KIND_LABELS.get(item["kind"], item["kind"]),
+                        "title": None, "start_time": None,
+                        "name": item.get("name")})
+    except Exception:
+        return []
+    return out
+
+
+def save_dataset(path, datasets, progress=None):
+    """Write datasets to an ``.npz`` file this program can open again.
 
     ``datasets`` is a list of ``{"name", "kind", "axes", "labels", "value",
-    "info", "motors"}`` dicts, one per entry; ``axes`` is ``(x, y)`` for a
-    cut and ``(x, y, z)`` otherwise, up to four for a spatial scan. Several
-    datasets go into one file as several top-level entries, exactly like a
-    beamline file holding several measurements -- so saving a selection and
-    reopening it gives the same rows back.
+    "info", "motors"}`` dicts, one per entry; ``axes`` is in the kind's
+    *constructor* order (see :data:`AXIS_SLOTS`). Several datasets go into
+    one file as several entries, so saving a selection and reopening it gives
+    the same rows back.
 
-    The entries are marked with :data:`NATIVE_ATTR`, which is what
-    :func:`_classify_entry` keys on, so the name of the entry is free to be
-    whatever the user called the dataset, and a file written here is
-    recognised on sight without anyone having to say which beamline it came
-    from.
-
-    ``progress`` is an optional ``callable(done, total, label)`` for a
-    caller showing a progress bar; it is called once per dataset. Raising
-    from it (which is how a Cancel button reports itself) aborts the write.
-
-    The array is stored in **its own dtype**. Earlier versions wrote
-    whatever the caller had promoted to float64, which doubled the file for
-    data that arrived as float32 or as integer counts, and lost nothing by
-    doing so.
-
-    Returns the entry names it actually used, in the order given. They are
-    not always the names asked for -- HDF5 group names cannot contain "/",
-    and two datasets may be called the same thing -- and the caller needs
-    the real ones to be able to point a list row at what was just written.
+    ``progress`` is an optional ``callable(done, total, label)``; raising
+    from it aborts the write. The array keeps its own dtype. A path without
+    the ``.npz`` extension gets it. Returns the entry names used.
     """
-    used = set()
+    import json
+    if not str(path).lower().endswith(NATIVE_EXTENSIONS):
+        path = str(path) + ".npz"
+    arrays = {}
+    entries = []
     written = []
     total = len(datasets)
-    if HANDLES.is_open(path):
-        # Overwriting a file a viewer is reading from would pull the data out
-        # from under it (and Windows refuses the write anyway, less clearly).
-        raise OSError(
-            f"{os.path.basename(path)} is open in a viewer (or listed and "
-            f"being read); close what uses it, or save under another name")
-    with h5py.File(path, "w") as f:
-        for index, item in enumerate(datasets):
-            if progress is not None:
-                progress(index, total, str(item.get("name", "")))
-            # HDF5 group names cannot contain '/', and two datasets may well
-            # have been given the same name by the user.
-            base = str(item["name"]).replace("/", "_").strip() or "dataset"
-            name, n = base, 2
-            while name in used:
-                name, n = f"{base}_{n}", n + 1
-            used.add(name)
-            written.append(name)
-
-            grp = f.create_group(name)
-            grp.attrs[NATIVE_ATTR] = str(item["kind"])
-            grp.attrs[NATIVE_FORMAT_ATTR] = NATIVE_FORMAT_VERSION
-            grp.attrs["nxsloader_name"] = str(item["name"])
-
-            axes = item["axes"]
-            # axis_w is the fourth, for a spatial scan; the first three keep
-            # their version-1 names so version-1 files stay readable.
-            for axis_name, values in zip(("axis_x", "axis_y", "axis_z", "axis_w"),
-                                         axes):
-                grp.create_dataset(axis_name, data=np.asarray(values, dtype=float))
-            value = np.asarray(item["value"])
-            # A 0-d or tiny array cannot be chunked, and compressing it would
-            # cost more in filter overhead than it saves.
-            options = dict(NATIVE_COMPRESSION) if value.size > 1024 else {}
-            grp.create_dataset("value", data=value, **options)
-
-            for axis, label in (item.get("labels") or {}).items():
-                if label:
-                    grp.create_dataset(f"label_{axis}", data=np.bytes_(str(label).encode()))
-
-            info = grp.create_group("info")
-            for key, val in (item.get("info") or {}).items():
-                try:
-                    info.attrs[str(key)] = val if isinstance(
-                        val, (int, float, np.integer, np.floating)) else str(val)
-                except (TypeError, ValueError):
-                    info.attrs[str(key)] = str(val)
-            motors = grp.create_group("motors")
-            for key, val in (item.get("motors") or {}).items():
-                try:
-                    motors.attrs[str(key)] = float(val)
-                except (TypeError, ValueError):
-                    motors.attrs[str(key)] = str(val)
+    for index, item in enumerate(datasets):
+        if progress is not None:
+            progress(index, total, str(item.get("name", "")))
+        key = "e%d" % index
+        axes = list(item["axes"])
+        for axis_name, values in zip(("x", "y", "z", "w"), axes):
+            arrays["%s.axis_%s" % (key, axis_name)] = np.asarray(values, dtype=float)
+        arrays[key + ".value"] = np.asarray(item["value"])
+        entries.append({
+            "entry": key,
+            "name": str(item["name"]),
+            "kind": str(item["kind"]),
+            "n_axes": len(axes),
+            "labels": {str(k): str(v) for k, v in (item.get("labels") or {}).items() if v},
+            "info": {str(k): _json_safe(v) for k, v in (item.get("info") or {}).items()},
+            "motors": {str(k): _json_safe(v) for k, v in (item.get("motors") or {}).items()},
+        })
+        written.append(key)
+    meta = {"format": NPZ_FORMAT, "version": 1, "entries": entries}
+    arrays[NPZ_META] = np.array(json.dumps(meta))
+    tmp = path + ".part.npz"
+    np.savez_compressed(tmp, **arrays)
+    os.replace(tmp, path)
     return written
 
 
-def list_datasets(path: str) -> "list[dict]":
+def list_datasets(path):
     """Every independently-openable dataset in a ``.nxs`` file.
 
     A single file routinely holds several measurements -- up to six Cuts or
@@ -1420,6 +1520,8 @@ def list_datasets(path: str) -> "list[dict]":
     file yields an empty list rather than raising -- a browser listing must
     not fail because of one bad file.
     """
+    if is_native_npz(path):
+        return _list_native_npz(path)
     out = []
     try:
         with HANDLES.borrow(path) as f:
@@ -1442,7 +1544,7 @@ def list_datasets(path: str) -> "list[dict]":
     return out
 
 
-def probe_kind(path: str) -> str:
+def probe_kind(path):
     """The kind of a file's *default* entry (see :func:`_pick_entry`), for
     callers that want one label per file. A browser listing wants
     :func:`list_datasets` instead, which enumerates every entry."""
@@ -1456,7 +1558,7 @@ def probe_kind(path: str) -> str:
         return "unknown"
 
 
-def list_entries(path: str) -> "list[tuple[str, Optional[int]]]":
+def list_entries(path):
     """List every top-level NeXus entry in ``path`` as ``(group_name, case)``
     pairs (``case`` is ``None`` if the entry's content doesn't match any
     known structure). Real SOLEIL files can contain *more than one*
@@ -1469,7 +1571,7 @@ def list_entries(path: str) -> "list[tuple[str, Optional[int]]]":
         return [("/" + k, _classify_entry(f, "/" + k)) for k in f.keys()]
 
 
-def _pick_entry(f: h5py.File, path: str, top_level: "list[str]") -> str:
+def _pick_entry(f, path, top_level):
     """Choose which top-level entry to parse when a file has more than one.
     Prefers a recognized entry with the highest numeric suffix (SOLEIL's
     ``..._0001``, ``..._0002``, ... naming), on the assumption that a lower
@@ -1488,7 +1590,7 @@ def _pick_entry(f: h5py.File, path: str, top_level: "list[str]") -> str:
     if len(recognized) == 1:
         return recognized[0][0]
 
-    def _suffix(name: str) -> int:
+    def _suffix(name):
         m = re.search(r"(\d+)$", name)
         return int(m.group(1)) if m else -1
 
@@ -1505,7 +1607,7 @@ def _pick_entry(f: h5py.File, path: str, top_level: "list[str]") -> str:
     return chosen
 
 
-def load_soleil_nxs(path: str, entry: Optional[str] = None) -> NxsScan:
+def load_soleil_nxs(path, entry=None):
     """Load a SOLEIL ANTARES nano-ARPES ``*.nxs`` file. Returns an
     :class:`NxsScan`. Raises for unsupported/unrecognized files rather than
     silently returning garbage (unlike the .m file, which would error out
@@ -1523,6 +1625,8 @@ def load_soleil_nxs(path: str, entry: Optional[str] = None) -> NxsScan:
     # h5py, and a dataset saved as .h5 or handed over as .hdf5 is readable
     # by exactly the same code; refusing it on its name alone meant a file
     # this program itself wrote could not be reopened.
+    if str(path).lower().endswith(NATIVE_EXTENSIONS):
+        return _parse_native_npz(path, entry)
     if not path.lower().endswith((".nxs", ".h5", ".hdf5", ".hdf", ".nx5")):
         raise ValueError(
             f"Not an HDF5/NeXus file (.nxs, .h5, .hdf5): {path}")
@@ -1594,7 +1698,7 @@ def load_soleil_nxs(path: str, entry: Optional[str] = None) -> NxsScan:
             HANDLES.release(path, f)
 
 
-def to_kspace_cube(scan: NxsScan, kinetic_energy_eV=None, work_function_eV: float = 4.5):
+def to_kspace_cube(scan, kinetic_energy_eV=None, work_function_eV=4.5):
     """For a ``kind == "map"`` scan, convert the raw deflector-angle axis
     (``scan.x``, in degrees) into momentum ``kx`` using
     :func:`deflector_angle_to_k`, returning ``(kx, ky, E, cube)`` where
@@ -1636,7 +1740,7 @@ def to_kspace_cube(scan: NxsScan, kinetic_energy_eV=None, work_function_eV: floa
 # --------------------------------------------------------------------------
 # Diagnostics
 # --------------------------------------------------------------------------
-def inspect_nxs(path: str, max_depth: int = 6) -> None:
+def inspect_nxs(path, max_depth=6):
     """Print the HDF5 tree (groups/datasets/shapes) and the detected case,
     for validating the axis-alignment assumptions above against a real
     file. Read-only, side-effect-free besides printing."""

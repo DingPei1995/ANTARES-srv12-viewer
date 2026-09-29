@@ -69,7 +69,6 @@ here: this file only reads what was measured.
 
 Nothing in here imports Qt.
 """
-from __future__ import annotations
 
 import os
 import re
@@ -94,7 +93,7 @@ _HEADER_LIMIT = 1 << 20          # no real header is anywhere near a megabyte
 # --------------------------------------------------------------------------
 # Headers
 # --------------------------------------------------------------------------
-def parse_header(text: str) -> dict:
+def parse_header(text):
     """``key<TAB>value`` lines into a dict.
 
     The first occurrence of a key wins -- ``RegNo`` appears twice in every
@@ -120,18 +119,18 @@ def parse_header(text: str) -> dict:
     return header
 
 
-def _number(header: dict, key: str, default=None):
+def _number(header, key, default=None):
     try:
         return float(str(header[key]).strip())
     except (KeyError, TypeError, ValueError):
         return default
 
 
-def _yes(header: dict, key: str) -> bool:
+def _yes(header, key):
     return str(header.get(key, "")).strip().upper() in ("YES", "1", "TRUE", "ON")
 
 
-def _pretty_scale(name: str, fallback: str) -> str:
+def _pretty_scale(name, fallback):
     """``"Y Angle(Degrees)"`` -> ``"Y angle (deg)"``; the analyser's own
     wording, with the unit where the rest of the program puts it."""
     name = str(name or "").strip()
@@ -148,7 +147,7 @@ def _pretty_scale(name: str, fallback: str) -> str:
 # --------------------------------------------------------------------------
 # The two file formats, down to (header, image) pairs
 # --------------------------------------------------------------------------
-def _pointer_table(path: str):
+def _pointer_table(path):
     """``(table, word_bits)``: the ``(offset, n_y, n_x)`` rows and whether
     the table was written in 64- or 32-bit integers. Raises ValueError if
     the start of the file is not a plausible table."""
@@ -177,7 +176,7 @@ def _pointer_table(path: str):
     raise ValueError("no MBS pointer table at the start of the file")
 
 
-def read_krx(path: str):
+def read_krx(path):
     """``[(header_dict, image), ...]`` from an MBS ``.krx`` file.
 
     ``image`` is ``(n_y, n_x)`` -- angle channels × energy steps -- as a
@@ -201,7 +200,7 @@ def read_krx(path: str):
     return out
 
 
-def _numeric_row(line: str):
+def _numeric_row(line):
     fields = [f for f in line.replace(",", ".").split("\t") if f.strip()]
     if len(fields) < 2:
         return None
@@ -211,7 +210,7 @@ def _numeric_row(line: str):
         return None
 
 
-def read_mbs_text(path: str):
+def read_mbs_text(path):
     """``[(header_dict, image, energy), ...]`` from an MBS ``.txt`` export.
 
     One block per header: the rows under ``DATA:`` are ``energy, c1, c2 …``,
@@ -254,7 +253,7 @@ def read_mbs_text(path: str):
 # --------------------------------------------------------------------------
 # What the file is
 # --------------------------------------------------------------------------
-def classify(header: dict, n_images: int) -> str:
+def classify(header, n_images):
     """``"spin_edc"``, ``"map"`` or ``"cut"``, from the header.
 
     The spin system being on with the main detector off is a spin
@@ -268,7 +267,7 @@ def classify(header: dict, n_images: int) -> str:
     return "cut"
 
 
-def energy_axis(header: dict, n: int) -> np.ndarray:
+def energy_axis(header, n):
     start = _number(header, "Start K.E.")
     step = _number(header, "Step Size")
     if start is None or step is None:
@@ -276,7 +275,7 @@ def energy_axis(header: dict, n: int) -> np.ndarray:
     return start + step * np.arange(int(n), dtype=float)
 
 
-def angle_axis(header: dict, n: int) -> np.ndarray:
+def angle_axis(header, n):
     start = _number(header, "ScaleMin")
     step = _number(header, "ScaleMult")
     if start is None or not step:
@@ -284,7 +283,7 @@ def angle_axis(header: dict, n: int) -> np.ndarray:
     return start + step * np.arange(int(n), dtype=float)
 
 
-def _map_axis(header: dict, n_images: int):
+def _map_axis(header, n_images):
     """The deflector values of a map, its label, and a note if the file
     holds fewer images than the header planned (an interrupted map)."""
     coordinate = str(header.get("MapCoordinate", "")).upper()
@@ -318,7 +317,7 @@ def _map_axis(header: dict, n_images: int):
     return values, label, note
 
 
-def _info(header: dict, path: str) -> dict:
+def _info(header, path):
     info = {f"mbs.{key}": value for key, value in header.items()
             if not key.startswith("_")}
     info["title"] = header.get("RegName") or os.path.splitext(
@@ -339,7 +338,7 @@ def _info(header: dict, path: str) -> dict:
     return info
 
 
-def _oriented(header: dict, image: np.ndarray) -> np.ndarray:
+def _oriented(header, image):
     """The image as (angle, energy). The energy steps are ``No. Steps``;
     if that is the first dimension the file was written the other way
     round, which no file seen does, but it costs one comparison to be sure."""
@@ -353,14 +352,14 @@ def _oriented(header: dict, image: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------
 # To an NxsScan
 # --------------------------------------------------------------------------
-def _read(path: str):
+def _read(path):
     """``[(header, image, energy_or_None)]`` from either format."""
     if path.lower().endswith(".krx"):
         return [(h, img, None) for h, img in read_krx(path)]
     return read_mbs_text(path)
 
 
-def load_mbs(path: str, progress=None) -> NxsScan:
+def load_mbs(path, progress=None):
     """Read one MBS file as a cut, a map or a spin EDC."""
     frames = _read(path)
     header = frames[0][0]
@@ -415,7 +414,7 @@ def load_mbs(path: str, progress=None) -> NxsScan:
     return scan
 
 
-def _spin_scan(path, frames, header, info) -> NxsScan:
+def _spin_scan(path, frames, header, info):
     """One spectrum per spin channel, as a (energy, channel) table."""
     components = list(header.get("_spin_components") or [])
     spectra = []
@@ -481,7 +480,7 @@ class CassiopeeSpinLoader(Loader):
     patterns = ("*.krx", "*.txt")
     priority = 21
 
-    def can_open(self, path: str) -> bool:
+    def can_open(self, path):
         """A ``.krx`` whose pointer table and first header check out, or a
         text file with the MBS header lines. Never the Scienta text files
         the other CASSIOPEE reader takes: those have none of these keys."""
@@ -512,7 +511,7 @@ class CassiopeeSpinLoader(Loader):
                        for marker in MBS_MARKERS)
         return False
 
-    def list_entries(self, path: str) -> list:
+    def list_entries(self, path):
         """One entry per file; the header says which kind."""
         try:
             if path.lower().endswith(".krx"):
@@ -534,7 +533,7 @@ class CassiopeeSpinLoader(Loader):
             "start_time": " ".join(str(header.get("STim", "")).split()) or None,
         }]
 
-    def load(self, path: str, entry: str = None, progress=None):
+    def load(self, path, entry=None, progress=None):
         return load_mbs(path, progress=progress)
 
 

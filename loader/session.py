@@ -34,7 +34,6 @@ that nothing is ever lost *because the program stopped*.
 
 No Qt in here, so it can be (and is) tested directly.
 """
-from __future__ import annotations
 
 import os
 import re
@@ -83,12 +82,12 @@ LOG_NAME = "operations.log"
 DEFAULT_BUDGET_BYTES = 1_500_000_000
 
 
-def _sanitise(name: str) -> str:
+def _sanitise(name):
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "_", str(name)).strip()
     return cleaned[:80] or "dataset"
 
 
-def scan_to_dict(kind: str, scan, name: str) -> dict:
+def scan_to_dict(kind, scan, name):
     """One dataset in the plain ``{name, kind, axes, labels, value, info,
     motors}`` form :func:`loader.nxs_file.save_dataset` takes.
 
@@ -113,7 +112,7 @@ def scan_to_dict(kind: str, scan, name: str) -> dict:
             "motors": dict(getattr(scan, "fourd_info", {}) or {})}
 
 
-def dataset_dict(data, name: str = None) -> dict:
+def dataset_dict(data, name=None):
     """:func:`scan_to_dict` for anything with ``.kind`` and ``.scan`` --
     an :class:`NxsData` or a :class:`MemoryData`."""
     return scan_to_dict(data.kind, data.scan,
@@ -130,12 +129,12 @@ class MemoryBudget:
     is kept *on spec*, not what is in use.
     """
 
-    def __init__(self, limit_bytes: int = DEFAULT_BUDGET_BYTES):
+    def __init__(self, limit_bytes=DEFAULT_BUDGET_BYTES):
         self.limit_bytes = int(limit_bytes)
         self._entries: "OrderedDict[str, tuple]" = OrderedDict()
 
     @staticmethod
-    def _size_of(data) -> int:
+    def _size_of(data):
         value = getattr(getattr(data, "scan", None), "value", None)
         if value is None:
             return 0
@@ -161,7 +160,7 @@ class MemoryBudget:
             except Exception:                               # noqa: BLE001
                 pass
 
-    def get(self, key: str):
+    def get(self, key):
         """The cached dataset, or None. The budget keeps its own reference;
         a caller that keeps the object should :meth:`retain` it."""
         entry = self._entries.get(key)
@@ -174,13 +173,13 @@ class MemoryBudget:
         self._entries.move_to_end(key)
         return entry[0]
 
-    def put(self, key: str, data):
+    def put(self, key, data):
         self.discard(key)
         self._entries[key] = (self._retain(data), self._size_of(data))
         self._evict()
         return data
 
-    def discard(self, key: str):
+    def discard(self, key):
         entry = self._entries.pop(key, None)
         if entry is not None:
             self._release(entry[0])
@@ -189,7 +188,7 @@ class MemoryBudget:
         for key in list(self._entries):
             self.discard(key)
 
-    def total_bytes(self) -> int:
+    def total_bytes(self):
         return sum(size for _data, size in self._entries.values())
 
     def _evict(self):
@@ -210,7 +209,7 @@ class SessionStore:
     #: before either has written anything still differ.
     _taken = set()
 
-    def __init__(self, root: str = None, budget_bytes: int = DEFAULT_BUDGET_BYTES):
+    def __init__(self, root=None, budget_bytes=DEFAULT_BUDGET_BYTES):
         self.root = root or DEFAULT_ROOT
         self.name = self._unique_name()
         self.folder = os.path.join(self.root, self.name)
@@ -218,7 +217,7 @@ class SessionStore:
         self._counter = 0
         self._ready = False
 
-    def _unique_name(self) -> str:
+    def _unique_name(self):
         """``<date>-<time>-<pid>``, with a suffix if that is taken.
 
         The timestamp has one-second resolution and the pid is reused by the
@@ -246,10 +245,10 @@ class SessionStore:
 
     # -- the log --------------------------------------------------------------
     @property
-    def log_path(self) -> str:
+    def log_path(self):
         return os.path.join(self.root, LOG_NAME)
 
-    def log(self, action: str, name: str = "", path: str = "", note: str = ""):
+    def log(self, action, name="", path="", note=""):
         """Append one line to the operations log.
 
         The log exists for one situation: the program stopped, and the work
@@ -280,7 +279,7 @@ class SessionStore:
             pass
         return line
 
-    def prune_old(self, keep_days: int = KEEP_DAYS) -> int:
+    def prune_old(self, keep_days=KEEP_DAYS):
         """Delete session folders older than ``keep_days``. Returns how many
         went. Never touches this session's own folder, and records what it
         removed in the log -- a sweep that silently deleted a folder
@@ -296,7 +295,7 @@ class SessionStore:
                 continue
             try:
                 if os.path.getmtime(path) < cutoff:
-                    files = len([f for f in os.listdir(path) if f.endswith(".nxs")])
+                    files = len([f for f in os.listdir(path) if f.endswith((".npz", ".nxs"))])
                     shutil.rmtree(path, ignore_errors=True)
                     self.log("PRUNE", name, path,
                              f"older than {keep_days} days, {files} dataset(s)")
@@ -305,7 +304,7 @@ class SessionStore:
                 continue
         return removed
 
-    def leftovers(self, include_legacy: bool = True):
+    def leftovers(self, include_legacy=True):
         """What earlier sessions left behind: see :func:`leftover_sessions`.
 
         Folders from before the program was renamed are included, so that
@@ -317,7 +316,7 @@ class SessionStore:
                 found.extend(leftover_sessions(legacy))
         return sorted(found, key=lambda entry: -entry["modified"])
 
-    def bytes_on_disk(self) -> int:
+    def bytes_on_disk(self):
         if not os.path.isdir(self.folder):
             return 0
         total = 0
@@ -329,14 +328,14 @@ class SessionStore:
         return total
 
     # -- storing ------------------------------------------------------------
-    def store(self, item: dict, progress=None) -> str:
+    def store(self, item, progress=None):
         """Write one dataset (in :func:`scan_to_dict` form) and return its
         path. The name only shapes the filename; uniqueness comes from a
         counter, so two datasets called the same thing do not collide."""
         self._ensure()
         self._counter += 1
         path = os.path.join(self.folder,
-                            f"{self._counter:03d}-{_sanitise(item.get('name'))}.nxs")
+                            f"{self._counter:03d}-{_sanitise(item.get('name'))}.npz")
         save_dataset(path, [item], progress=progress)
         try:
             size = os.path.getsize(path)
@@ -345,10 +344,10 @@ class SessionStore:
         self.log("STORE", item.get("name", ""), path, f"{size / 1e6:.1f} MB")
         return path
 
-    def store_data(self, data, name: str = None, progress=None) -> str:
+    def store_data(self, data, name=None, progress=None):
         return self.store(dataset_dict(data, name), progress=progress)
 
-    def released(self, path: str, saved_to: str):
+    def released(self, path, saved_to):
         """The dataset at ``path`` now lives in a file the user chose, so
         the working copy is not needed any more.
 
@@ -361,11 +360,11 @@ class SessionStore:
                  "working copy removed")
         self._remove(path)
 
-    def discard(self, path: str, reason: str = "removed from the list"):
+    def discard(self, path, reason="removed from the list"):
         self.log("DISCARD", os.path.basename(path), path, reason)
         self._remove(path)
 
-    def _remove(self, path: str):
+    def _remove(self, path):
         self.budget.discard(path)
         try:
             os.remove(path)
@@ -373,17 +372,17 @@ class SessionStore:
             pass
 
     # -- reading back --------------------------------------------------------
-    def load_scan(self, path: str):
+    def load_scan(self, path):
         """The :class:`NxsScan` stored at ``path``. Its array is a
         :class:`loader.nxs_file.LazyArray`, so this is cheap and stays cheap
         until something asks for the numbers."""
         return load_soleil_nxs(path)
 
-    def entries(self, path: str):
+    def entries(self, path):
         return list_datasets(path)
 
 
-def read_log(root: str = None, limit: int = 500):
+def read_log(root=None, limit=500):
     """The operations log, newest last, as ``(when, session, action, name,
     path, note)`` tuples.
 
@@ -407,7 +406,7 @@ def read_log(root: str = None, limit: int = 500):
     return rows[-limit:] if limit else rows
 
 
-def leftover_sessions(root: str = None, exclude: str = None):
+def leftover_sessions(root=None, exclude=None):
     """Earlier sessions whose folders still hold datasets.
 
     After a crash this is the list of "work that was never saved anywhere
@@ -428,7 +427,7 @@ def leftover_sessions(root: str = None, exclude: str = None):
         if not os.path.isdir(folder) or folder == exclude:
             continue
         try:
-            files = sorted(f for f in os.listdir(folder) if f.endswith(".nxs"))
+            files = sorted(f for f in os.listdir(folder) if f.endswith((".npz", ".nxs")))
         except OSError:
             continue
         if not files:
@@ -445,7 +444,7 @@ def leftover_sessions(root: str = None, exclude: str = None):
     return sorted(found, key=lambda entry: -entry["modified"])
 
 
-def estimate_bytes(*arrays) -> int:
+def estimate_bytes(*arrays):
     """Total footprint of some arrays, counting a lazy one as zero (it is
     not resident). For reporting, not for allocation."""
     total = 0

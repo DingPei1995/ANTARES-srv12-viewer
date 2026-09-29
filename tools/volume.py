@@ -31,11 +31,12 @@ inside ``slice``. Here the orientation is three sign flips over one
 construction (:func:`notched_box`), and a face that has been squeezed to
 nothing is simply not produced.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
+
+from compat.numpy_compat import nan_to_num
 from scipy import ndimage
 
 
@@ -51,17 +52,17 @@ class Face:
     regular ``(nu, nv)`` grid over that rectangle. The painter needs only
     an affine map from image space to the projected corners.
     """
-    image: np.ndarray
-    corners: np.ndarray                  # (4, 3)
-    name: str = ""
-    axis: int = 0                        # which axis the plane is normal to
-    position: float = 0.0                # where along it
-    outward: int = 0                     # +1/-1 along `axis`; 0 = two-sided
+    image: 'np.ndarray'
+    corners: 'np.ndarray'                  # (4, 3)
+    name: 'str' = ""
+    axis: 'int' = 0                        # which axis the plane is normal to
+    position: 'float' = 0.0                # where along it
+    outward: 'int' = 0                     # +1/-1 along `axis`; 0 = two-sided
 
-    def centroid(self) -> np.ndarray:
+    def centroid(self):
         return np.asarray(self.corners, dtype=float).mean(axis=0)
 
-    def normal(self) -> np.ndarray:
+    def normal(self):
         """The outward unit normal, or the geometric one for a two-sided face.
 
         Which side of a face is outside is a fact about how the solid was
@@ -90,8 +91,8 @@ def _index_coords(axis, values):
     return (np.asarray(values, dtype=float) - start) / step
 
 
-def sample_plane(values, axes, axis: int, position: float, u_range, v_range,
-                 nu: int, nv: int) -> np.ndarray:
+def sample_plane(values, axes, axis, position, u_range, v_range,
+                 nu, nv):
     """Sample the volume on a rectangle of the plane ``axis = position``.
 
     The two remaining axes, in their natural order, become u and v.
@@ -124,7 +125,7 @@ def sample_plane(values, axes, axis: int, position: float, u_range, v_range,
     return out.reshape(gu.shape)
 
 
-def _face_corners(axis: int, position: float, u_range, v_range) -> np.ndarray:
+def _face_corners(axis, position, u_range, v_range):
     """The four world corners of a plane rectangle, in (0, +u, +u+v, +v)."""
     axis = int(axis) % 3
     others = [d for d in range(3) if d != axis]
@@ -141,7 +142,7 @@ def _span(a, b):
     return (min(float(a), float(b)), max(float(a), float(b)))
 
 
-def _resolution(span, limits, density: int) -> int:
+def _resolution(span, limits, density):
     """How many samples a face of this length deserves, capped so that a
     thin sliver of a notch does not ask for a megapixel."""
     total = abs(float(limits[1]) - float(limits[0])) or 1.0
@@ -160,8 +161,8 @@ def _split(interval, cut):
     return [(lo, float(cut)), (float(cut), hi)]
 
 
-def slice_faces(values, axes, positions, *, density: int = 400,
-                limits=None) -> list:
+def slice_faces(values, axes, positions, *, density=400,
+                limits=None):
     """The three orthogonal cut planes of ``slice_3d_plot.m``.
 
     ``positions`` is ``(x, y, z)``; any entry that is None is skipped, so
@@ -216,8 +217,8 @@ def _bounds(axes, limits=None):
 # ==========================================================================
 # The notched cube
 # ==========================================================================
-def notched_box(values, axes, notch, *, corner=(1, 1, 1), density: int = 400,
-                limits=None) -> list:
+def notched_box(values, axes, notch, *, corner=(1, 1, 1), density=400,
+                limits=None):
     """The cube with one corner cut away -- the best single picture of a
     3-D ARPES volume, because it shows a constant-energy map and two
     dispersions at once.
@@ -308,12 +309,12 @@ class Camera:
     a k-k-E volume presentable -- ``axis equal`` is exactly wrong there,
     since an inverse angstrom and an electronvolt have no common length.
     """
-    azimuth: float = 45.0                # degrees, around the z axis
-    elevation: float = 25.0              # degrees, above the xy plane
-    roll: float = 0.0
-    aspect: tuple = (1.0, 1.0, 1.0)
+    azimuth: 'float' = 45.0                # degrees, around the z axis
+    elevation: 'float' = 25.0              # degrees, above the xy plane
+    roll: 'float' = 0.0
+    aspect: 'tuple' = (1.0, 1.0, 1.0)
 
-    def basis(self) -> np.ndarray:
+    def basis(self):
         """Rows: right, up, towards the viewer."""
         az = np.radians(self.azimuth)
         el = np.radians(self.elevation)
@@ -347,7 +348,7 @@ class Camera:
         return screen, depth
 
 
-def _edge_key(a, b, places: int = 9):
+def _edge_key(a, b, places=9):
     """A corner pair as a hashable key, independent of which end is first."""
     ends = tuple(sorted((tuple(round(float(v), places) for v in a),
                          tuple(round(float(v), places) for v in b))))
@@ -394,7 +395,7 @@ def outline_edges(faces):
     return out
 
 
-def sort_faces(faces, camera: Camera, bounds):
+def sort_faces(faces, camera, bounds):
     """Faces back to front, and their projected corners.
 
     Ordering by the centroid's depth is exact for the disjoint axis-aligned
@@ -409,7 +410,7 @@ def sort_faces(faces, camera: Camera, bounds):
     return [(face, screen) for _, face, screen in entries]
 
 
-def visible(faces, camera: Camera, bounds, *, cull: bool = True):
+def visible(faces, camera, bounds, *, cull=True):
     """Drop the faces that point away from the viewer.
 
     A face is kept when its recorded outward normal has a non-negative
@@ -435,8 +436,8 @@ def visible(faces, camera: Camera, bounds, *, cull: bool = True):
 # ==========================================================================
 # View-aligned resampling, and what it makes possible
 # ==========================================================================
-def view_volume(values, axes, camera: Camera, *, samples: int = 180,
-                bounds=None) -> np.ndarray:
+def view_volume(values, axes, camera, *, samples=180,
+                bounds=None):
     """Resample the volume onto a grid aligned with the camera.
 
     Returns ``(right, up, depth)`` with depth increasing **towards** the
@@ -477,7 +478,7 @@ def view_volume(values, axes, camera: Camera, *, samples: int = 180,
     return out.reshape(gr.shape)
 
 
-def project_volume(cube, *, mode: str = "mip", levels=None, alpha: float = 0.06):
+def project_volume(cube, *, mode="mip", levels=None, alpha=0.06):
     """Collapse a view-aligned cube into one image.
 
     ``"mip"`` takes the maximum along the line of sight -- the simplest and
@@ -502,7 +503,7 @@ def project_volume(cube, *, mode: str = "mip", levels=None, alpha: float = 0.06)
                   else (0.0, 1.0))
     lo, hi = float(levels[0]), float(levels[1])
     span = (hi - lo) or 1.0
-    scaled = np.clip((np.nan_to_num(cube, nan=lo) - lo) / span, 0.0, 1.0)
+    scaled = np.clip((nan_to_num(cube, nan=lo) - lo) / span, 0.0, 1.0)
     opacity = np.clip(scaled * float(alpha), 0.0, 1.0)
 
     # Front to back: the depth axis increases towards the viewer, so walk
@@ -516,7 +517,7 @@ def project_volume(cube, *, mode: str = "mip", levels=None, alpha: float = 0.06)
     return out
 
 
-def isosurface_depth(cube, level: float):
+def isosurface_depth(cube, level):
     """Where each line of sight first crosses ``level``, and a shading.
 
     A full marching-cubes mesh is not needed to *look at* an isosurface, and
@@ -526,7 +527,7 @@ def isosurface_depth(cube, level: float):
     NaN where no crossing was found.
     """
     cube = np.asarray(cube, dtype=float)
-    filled = np.nan_to_num(cube, nan=-np.inf)
+    filled = nan_to_num(cube, nan=-np.inf)
     above = filled >= float(level)
     # Depth increases towards the viewer, so the *last* index that is above
     # the level is the nearest surface the ray meets.
@@ -534,7 +535,7 @@ def isosurface_depth(cube, level: float):
     nearest = cube.shape[2] - 1 - np.argmax(above[:, :, ::-1], axis=2)
     depth = np.where(any_hit, nearest.astype(float), np.nan)
 
-    smooth = ndimage.gaussian_filter(np.nan_to_num(depth, nan=0.0), 1.5,
+    smooth = ndimage.gaussian_filter(nan_to_num(depth, nan=0.0), 1.5,
                                      mode="nearest")
     gx, gy = np.gradient(smooth)
     normal = np.stack([-gx, -gy, np.ones_like(smooth)], axis=-1)
@@ -548,8 +549,8 @@ def isosurface_depth(cube, level: float):
 # ==========================================================================
 # 3-D symmetrisation
 # ==========================================================================
-def symmetrise_volume(values, x_axis, y_axis, z_axis, *, fold: int = 1,
-                      centre=(0.0, 0.0), mirror_angles=(), inversion: bool = False,
+def symmetrise_volume(values, x_axis, y_axis, z_axis, *, fold=1,
+                      centre=(0.0, 0.0), mirror_angles=(), inversion=False,
                       sector=None, progress=None):
     """Symmetrise every constant-``z`` plane of a volume about the same axis.
 
@@ -644,7 +645,7 @@ def reduce_volume(values, axes, ranges=None, targets=None):
     return values, axes
 
 
-def apply_plane_wise(values, function, *, axis: int = 2, progress=None):
+def apply_plane_wise(values, function, *, axis=2, progress=None):
     """Run a 2-D operation on every plane of a volume.
 
     Smoothing, derivatives and curvature are all defined on a plane; a

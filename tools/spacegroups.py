@@ -18,20 +18,19 @@ monoclinic, hexagonal axes for rhombohedral). Turn them into Cartesian
 rotations with tools.lattice.point_group_operations rather than applying
 them to Cartesian vectors directly.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass
+from compat.dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class SpacegroupInfo:
-    number: int
-    symbol: str              # ITA short Hermann-Mauguin symbol
-    crystal_system: str
-    centering: str           # P, C, I, F or R (A/B normalised to C)
-    bravais_symbol: str      # e.g. 'cF', 'hR', 'mC'
-    point_group: str
-    operations: int          # index into POINT_GROUP_OPERATIONS
+    number: 'int'
+    symbol: 'str'              # ITA short Hermann-Mauguin symbol
+    crystal_system: 'str'
+    centering: 'str'           # P, C, I, F or R (A/B normalised to C)
+    bravais_symbol: 'str'      # e.g. 'cF', 'hR', 'mC'
+    point_group: 'str'
+    operations: 'int'          # index into POINT_GROUP_OPERATIONS
 
 
 SPACEGROUPS = {
@@ -727,7 +726,7 @@ POINT_GROUP_OPERATIONS = (
 )
 
 
-def spacegroup_info(number: int) -> SpacegroupInfo:
+def spacegroup_info(number):
     """Look up a space group by its ITA number (1-230)."""
     try:
         return SPACEGROUPS[int(number)]
@@ -736,7 +735,7 @@ def spacegroup_info(number: int) -> SpacegroupInfo:
             f"space group number must be 1-230, got {number}") from None
 
 
-def point_group_rotations(number: int):
+def point_group_rotations(number):
     """The space group's point-group rotations, as a tuple of 3x3
     integer matrices (nested tuples) in conventional-cell fractional
     coordinates. See tools.lattice.point_group_operations for the

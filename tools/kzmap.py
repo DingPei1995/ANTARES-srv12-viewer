@@ -32,7 +32,6 @@ What this module does, in order
 Nothing here imports Qt, so the whole calibration can be run from a script
 over a directory of scans.
 """
-from __future__ import annotations
 
 import warnings
 
@@ -71,7 +70,7 @@ class KzMapResult:
         self.normalised = normalised
 
     @property
-    def spread(self) -> float:
+    def spread(self):
         """How far apart the fitted Fermi levels were, in eV.
 
         This is the number the whole exercise is about: it is how wrong the
@@ -81,7 +80,7 @@ class KzMapResult:
         finite = self.ef[np.isfinite(self.ef)]
         return float(finite.max() - finite.min()) if finite.size else 0.0
 
-    def summary(self) -> str:
+    def summary(self):
         failed = int((~self.ok).sum())
         lines = [
             f"{self.ok.size} spectra, {self.ok.sum()} fitted, "
@@ -112,7 +111,7 @@ def region_edc(cube, index_region):
         return np.nansum(block, axis=0)
 
 
-def _is_an_edge(fit, lo: float, hi: float, margin: float) -> bool:
+def _is_an_edge(fit, lo, hi, margin):
     """Did this fit actually find a Fermi edge, or merely converge?
 
     ``fit_fermi_edge`` reports success on data with no edge in it at all --
@@ -162,7 +161,7 @@ def _is_an_edge(fit, lo: float, hi: float, margin: float) -> bool:
 is_an_edge = _is_an_edge
 
 
-def fit_levels(cube, energy, index_region, *, temperature: float = 30.0,
+def fit_levels(cube, energy, index_region, *, temperature=30.0,
                fixed=("temperature",), progress=None):
     """Fit the Fermi edge of every spectrum in the stack.
 
@@ -325,9 +324,9 @@ def normalise_totals(cube):
 # --------------------------------------------------------------------------
 # All three, in order
 # --------------------------------------------------------------------------
-def process_kz_map(cube, energy, index_region, *, temperature: float = 30.0,
-                   fixed=("temperature",), normalise: bool = True,
-                   progress=None) -> KzMapResult:
+def process_kz_map(cube, energy, index_region, *, temperature=30.0,
+                   fixed=("temperature",), normalise=True,
+                   progress=None):
     """Fit, align, crop and (optionally) normalise a whole kz map.
 
     ``cube`` is ``(hv, angle, E)``; ``index_region`` is the box picked on the

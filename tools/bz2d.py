@@ -18,7 +18,6 @@ compute the origin point's Voronoi cell -- but that version hardcodes
 square, rectangular, centred-rectangular or oblique plane lattice works
 exactly the same way as a hexagonal one.
 """
-from __future__ import annotations
 
 import numpy as np
 from scipy.spatial import Voronoi
@@ -27,7 +26,7 @@ __all__ = ["reciprocal_vectors_2d", "wigner_seitz_cell_2d", "tile_2d",
            "lattice_point_group_2d", "irreducible_cell_2d"]
 
 
-def reciprocal_vectors_2d(a1: np.ndarray, a2: np.ndarray):
+def reciprocal_vectors_2d(a1, a2):
     """2-D reciprocal vectors (physicist's convention, 2*pi included) for
     the plane lattice spanned by real-space ``a1``, ``a2``.
 
@@ -46,7 +45,7 @@ def reciprocal_vectors_2d(a1: np.ndarray, a2: np.ndarray):
     return b1_3d[:2], b2_3d[:2]
 
 
-def wigner_seitz_cell_2d(g1: np.ndarray, g2: np.ndarray, shell: int = 2) -> np.ndarray:
+def wigner_seitz_cell_2d(g1, g2, shell=2):
     """The origin's Voronoi cell in the lattice spanned by ``g1``, ``g2``:
     the Wigner-Seitz cell of a 2-D reciprocal lattice, i.e. the 2-D
     Brillouin zone. Returns a closed ``(n+1, 2)`` array of vertices.
@@ -78,7 +77,7 @@ def wigner_seitz_cell_2d(g1: np.ndarray, g2: np.ndarray, shell: int = 2) -> np.n
         "neighbour shells -- check g1, g2 for degeneracy.")
 
 
-def _cross2(u, v) -> float:
+def _cross2(u, v):
     """The scalar cross product of two plane vectors.
 
     Spelled out rather than calling :func:`numpy.cross`, which deprecated
@@ -87,8 +86,8 @@ def _cross2(u, v) -> float:
     return float(u[0] * v[1] - u[1] * v[0])
 
 
-def lattice_point_group_2d(g1: np.ndarray, g2: np.ndarray,
-                           max_index: int = 3) -> np.ndarray:
+def lattice_point_group_2d(g1, g2,
+                           max_index=3):
     """The plane lattice's own point group (its holohedry) as ``(N, 2, 2)``
     Cartesian matrices: every rotation and reflection that maps the lattice
     spanned by ``g1``, ``g2`` onto itself.
@@ -139,7 +138,7 @@ def lattice_point_group_2d(g1: np.ndarray, g2: np.ndarray,
     return np.array(operations)
 
 
-def _clip_half_plane(polygon: np.ndarray, normal: np.ndarray, tol: float):
+def _clip_half_plane(polygon, normal, tol):
     """The part of a convex ``polygon`` (open, no repeated last point) with
     ``normal . k <= 0``, by Sutherland-Hodgman clipping."""
     kept = []
@@ -154,7 +153,7 @@ def _clip_half_plane(polygon: np.ndarray, normal: np.ndarray, tol: float):
     return np.array(kept) if kept else np.zeros((0, 2))
 
 
-def _simplify_polygon(polygon: np.ndarray, tol: float) -> np.ndarray:
+def _simplify_polygon(polygon, tol):
     """Drop repeated and collinear vertices from a convex polygon (open).
 
     Clipping a polygon with a line that runs exactly through one of its
@@ -185,7 +184,7 @@ def _simplify_polygon(polygon: np.ndarray, tol: float) -> np.ndarray:
     return np.array(straight) if len(straight) >= 3 else np.array(kept)
 
 
-def irreducible_cell_2d(polygon: np.ndarray, operations) -> np.ndarray:
+def irreducible_cell_2d(polygon, operations):
     """The irreducible 2-D Brillouin zone: the wedge of ``polygon`` that the
     ``operations`` (from :func:`lattice_point_group_2d`) repeat into the
     whole of it. Returns a closed ``(n+1, 2)`` array, like
@@ -254,8 +253,8 @@ def irreducible_cell_2d(polygon: np.ndarray, operations) -> np.ndarray:
     return np.vstack([wedge, wedge[:1]])
 
 
-def tile_2d(polygon: np.ndarray, g1: np.ndarray, g2: np.ndarray,
-           x_range, y_range, margin: int = 2):
+def tile_2d(polygon, g1, g2,
+           x_range, y_range, margin=2):
     """Copies of ``polygon`` (as returned by :func:`wigner_seitz_cell_2d`,
     or any closed polygon centred on the origin) translated to every point
     of the lattice spanned by ``g1``, ``g2`` that falls near

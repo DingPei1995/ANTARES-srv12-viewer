@@ -42,10 +42,9 @@ What is different from the lab's MATLAB ``FitFermiSurface``, and why:
   when both are free the fit reports their correlation so the degeneracy is
   visible rather than silent.
 """
-from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 
@@ -77,7 +76,7 @@ PARAMETER_LABELS = {
 # --------------------------------------------------------------------------
 # The model
 # --------------------------------------------------------------------------
-def fermi_function(energy, ef: float, temperature: float) -> np.ndarray:
+def fermi_function(energy, ef, temperature):
     """Fermi-Dirac occupation. ``expit(-x)`` rather than ``1/(exp(x)+1)``:
     same function, but it does not overflow when the exponent is large."""
     energy = np.asarray(energy, dtype=float)
@@ -91,8 +90,8 @@ def _unbroadened(energy, ef, temperature, dos0, dos1, bkg0, bkg1):
             + bkg0 + bkg1 * shifted)
 
 
-def _convolution_offsets(sigma: float, kt: float, n_sigma: float = 6.0,
-                         max_points: int = 1201):
+def _convolution_offsets(sigma, kt, n_sigma=6.0,
+                         max_points=1201):
     """Offsets and weights for integrating against a Gaussian of width
     ``sigma``.
 
@@ -108,9 +107,9 @@ def _convolution_offsets(sigma: float, kt: float, n_sigma: float = 6.0,
     return offsets, weights / weights.sum()
 
 
-def fermi_edge_model(energy, ef: float, temperature: float, resolution: float,
-                     dos0: float, dos1: float = 0.0, bkg0: float = 0.0,
-                     bkg1: float = 0.0) -> np.ndarray:
+def fermi_edge_model(energy, ef, temperature, resolution,
+                     dos0, dos1=0.0, bkg0=0.0,
+                     bkg1=0.0):
     """The full model above, evaluated at ``energy`` (any order, any
     spacing). ``resolution`` is the Gaussian **FWHM**."""
     energy = np.asarray(energy, dtype=float)
@@ -123,8 +122,8 @@ def fermi_edge_model(energy, ef: float, temperature: float, resolution: float,
     return values @ weights
 
 
-def broadened_fermi(energy, ef: float, temperature: float,
-                    resolution: float) -> np.ndarray:
+def broadened_fermi(energy, ef, temperature,
+                    resolution):
     """Just the occupation, resolution-broadened and normalised to 1 well
     below E_F. This -- not the whole model -- is what dividing a spectrum by
     the Fermi cut-off should divide by."""
@@ -135,7 +134,7 @@ def broadened_fermi(energy, ef: float, temperature: float,
 # --------------------------------------------------------------------------
 # Starting values
 # --------------------------------------------------------------------------
-def _smooth(values: np.ndarray, width: int) -> np.ndarray:
+def _smooth(values, width):
     width = max(3, int(width) | 1)
     if values.size < width:
         return values
@@ -143,7 +142,7 @@ def _smooth(values: np.ndarray, width: int) -> np.ndarray:
     return np.convolve(values, kernel, mode="same")
 
 
-def initial_guess(energy, intensity, temperature: float = 30.0) -> dict:
+def initial_guess(energy, intensity, temperature=30.0):
     """Starting values read off the data itself, so nothing has to be typed.
 
     E_F is the steepest fall of the smoothed spectrum; the background and
@@ -194,7 +193,7 @@ def initial_guess(energy, intensity, temperature: float = 30.0) -> dict:
             "dos0": dos0, "dos1": dos1, "bkg0": bkg0, "bkg1": bkg1}
 
 
-def steepest_drop(energy, intensity) -> float:
+def steepest_drop(energy, intensity):
     """Where the intensity falls fastest -- a starting E_F for a window
     that holds more than the edge.
 
@@ -223,31 +222,31 @@ def steepest_drop(energy, intensity) -> float:
 class FermiFit:
     """What a fit produced: values, their uncertainties, and enough about
     the fit itself to judge whether to believe them."""
-    values: dict
-    errors: dict
-    fixed: tuple = ()
-    reduced_chi2: float = float("nan")
-    correlation: dict = field(default_factory=dict)
-    window: tuple = (None, None)
-    n_points: int = 0
-    success: bool = False
-    message: str = ""
+    values: 'dict'
+    errors: 'dict'
+    fixed: 'tuple' = ()
+    reduced_chi2: 'float' = float("nan")
+    correlation: 'dict' = field(default_factory=dict)
+    window: 'tuple' = (None, None)
+    n_points: 'int' = 0
+    success: 'bool' = False
+    message: 'str' = ""
 
-    def model(self, energy) -> np.ndarray:
+    def model(self, energy):
         return fermi_edge_model(energy, **{k: self.values[k] for k in PARAMETERS})
 
     @property
-    def thermal_width(self) -> float:
+    def thermal_width(self):
         """The 10-90 % width the temperature alone would give (eV)."""
         return 3.53 * K_B * self.values["temperature"]
 
     @property
-    def combined_width(self) -> float:
+    def combined_width(self):
         """Thermal and instrumental widths added in quadrature -- the width
         actually measured, and the only one determined when both are free."""
         return float(np.hypot(self.thermal_width, self.values["resolution"]))
 
-    def summary(self) -> str:
+    def summary(self):
         ef, def_ = self.values["ef"], self.errors.get("ef", float("nan"))
         res, dres = self.values["resolution"], self.errors.get("resolution", float("nan"))
         text = (f"E_F = {ef:.5g} ± {def_:.2g} eV\n"
@@ -264,7 +263,7 @@ class FermiFit:
         return text
 
 
-def _weights(intensity: np.ndarray, weighting: str) -> np.ndarray:
+def _weights(intensity, weighting):
     if weighting == "uniform":
         return np.ones_like(intensity)
     # Poisson: sigma = sqrt(counts), with a floor so empty channels do not
@@ -273,10 +272,10 @@ def _weights(intensity: np.ndarray, weighting: str) -> np.ndarray:
     return 1.0 / np.sqrt(np.maximum(intensity, floor))
 
 
-def fit_fermi_edge(energy, intensity, *, start: dict = None,
-                   fixed=("temperature",), temperature: float = 30.0,
-                   window=(None, None), weighting: str = "poisson",
-                   max_nfev: int = 2000) -> FermiFit:
+def fit_fermi_edge(energy, intensity, *, start=None,
+                   fixed=("temperature",), temperature=30.0,
+                   window=(None, None), weighting="poisson",
+                   max_nfev=2000):
     """Fit the model to one EDC.
 
     ``fixed`` names the parameters to hold at their starting values; the
@@ -372,10 +371,10 @@ def fit_fermi_edge(energy, intensity, *, start: dict = None,
 # --------------------------------------------------------------------------
 # Channel by channel, for a Fermi-surface correction from a reference
 # --------------------------------------------------------------------------
-def fit_channels(angles, energy, frame, *, half_width: int = 0, step: int = 1,
-                 temperature: float = 30.0, fixed=("temperature",),
-                 window=(None, None), weighting: str = "poisson",
-                 start: dict = None, progress=None):
+def fit_channels(angles, energy, frame, *, half_width=0, step=1,
+                 temperature=30.0, fixed=("temperature",),
+                 window=(None, None), weighting="poisson",
+                 start=None, progress=None):
     """Fit the edge in every detector channel of ``frame`` (angle, energy).
 
     ``half_width`` adds that many neighbouring channels on each side to the
@@ -440,9 +439,9 @@ def fit_channels(angles, energy, frame, *, half_width: int = 0, step: int = 1,
 # --------------------------------------------------------------------------
 # Dividing the Fermi cut-off out
 # --------------------------------------------------------------------------
-def divide_fermi(energy, values, ef: float, temperature: float,
-                 resolution: float, *, energy_dim: int = -1,
-                 cutoff_kt: float = 4.0, background=None):
+def divide_fermi(energy, values, ef, temperature,
+                 resolution, *, energy_dim=-1,
+                 cutoff_kt=4.0, background=None):
     """Divide a spectrum by the resolution-broadened Fermi function.
 
     Only the **occupation** is divided out -- not the fitted density of

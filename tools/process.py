@@ -42,11 +42,12 @@ curvature to zero -- half the structure, and the half that says where the
 band is *not*. Clipping is a display decision; it belongs in the levels, and
 the panel offers it there.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
+
+from compat.numpy_compat import nan_to_num
 from scipy import ndimage, signal
 
 #: Boltzmann's constant in eV/K -- the same value tools.fermi uses.
@@ -56,7 +57,7 @@ K_B = 8.617333262e-5
 # ==========================================================================
 # Shared helpers
 # ==========================================================================
-def axis_step(axis) -> float:
+def axis_step(axis):
     """The mean step of an axis, positive, never zero.
 
     Axes here are regular by construction (the file parser builds them from
@@ -77,7 +78,7 @@ def _as_2d(values):
     return values
 
 
-def _fill_nans(values: np.ndarray) -> np.ndarray:
+def _fill_nans(values):
     """Replace every NaN with the value of its nearest finite neighbour.
 
     Filters need a value everywhere. Filling with zero would drag a band's
@@ -96,7 +97,7 @@ def _fill_nans(values: np.ndarray) -> np.ndarray:
     return values[tuple(index)]
 
 
-def _restore_nans(result: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def _restore_nans(result, mask):
     """Put the original missing points back into a filtered result."""
     if mask.all():
         return result
@@ -105,7 +106,7 @@ def _restore_nans(result: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return out
 
 
-def _odd(n: int, lo: int = 3) -> int:
+def _odd(n, lo=3):
     """The nearest odd integer at least ``lo`` -- window lengths must be odd
     for the fit to be centred on the point it replaces."""
     n = int(round(n))
@@ -114,7 +115,7 @@ def _odd(n: int, lo: int = 3) -> int:
     return max(lo, n)
 
 
-def normalise_unit(values: np.ndarray):
+def normalise_unit(values):
     """Map finite values to [0, 1]; returns ``(scaled, lo, span)``.
 
     Curvature and the gradient enhancement compare derivatives against a
@@ -134,7 +135,7 @@ def normalise_unit(values: np.ndarray):
 # ==========================================================================
 # 1. Smoothing
 # ==========================================================================
-def gaussian_smooth(values, axes, sigmas, *, in_units: bool = True):
+def gaussian_smooth(values, axes, sigmas, *, in_units=True):
     """NaN-aware Gaussian blur, with the widths given in the axes' own units.
 
     ``sigmas`` is one width per dimension -- in eV, A^-1, degrees, whatever
@@ -167,7 +168,7 @@ def gaussian_smooth(values, axes, sigmas, *, in_units: bool = True):
     return _restore_nans(out, mask)
 
 
-def savgol_smooth(values, axes, windows, order: int = 2, *, in_units: bool = True):
+def savgol_smooth(values, axes, windows, order=2, *, in_units=True):
     """Savitzky-Golay smoothing, applied along each axis in turn.
 
     Unlike a Gaussian this keeps peak height and width: it fits a local
@@ -193,7 +194,7 @@ def savgol_smooth(values, axes, windows, order: int = 2, *, in_units: bool = Tru
     return _restore_nans(out, mask)
 
 
-def box_smooth(values, axes, windows, *, in_units: bool = True):
+def box_smooth(values, axes, windows, *, in_units=True):
     """Plain moving average -- the honest version of a detector rebin that
     keeps the sampling. NaN-aware in the same way as :func:`gaussian_smooth`."""
     values = np.asarray(values, dtype=float)
@@ -219,8 +220,8 @@ SMOOTHERS = {"gaussian": gaussian_smooth, "savgol": savgol_smooth, "box": box_sm
 # ==========================================================================
 # 2. Derivatives
 # ==========================================================================
-def derivative(values, axes, dim: int, order: int = 2, *, window=None,
-               poly: int = None, in_units: bool = True, negate: bool = True):
+def derivative(values, axes, dim, order=2, *, window=None,
+               poly=None, in_units=True, negate=True):
     """The ``order``-th derivative along one axis, by local polynomial fit.
 
     ``window`` is the fitting width in the axis's units (its default is
@@ -262,8 +263,8 @@ def derivative(values, axes, dim: int, order: int = 2, *, window=None,
     return _restore_nans(out, mask)
 
 
-def laplacian(values, axes, *, window=None, poly: int = None, in_units: bool = True,
-              weights=None, negate: bool = True):
+def laplacian(values, axes, *, window=None, poly=None, in_units=True,
+              weights=None, negate=True):
     """``-(d^2/dx^2 + d^2/dy^2)``, each term normalised before it is added.
 
     ``del2`` in MATLAB silently carries a factor of 1/4 and adds the two
@@ -290,7 +291,7 @@ def laplacian(values, axes, *, window=None, poly: int = None, in_units: bool = T
     return -out if negate else out
 
 
-def _rms(values: np.ndarray) -> float:
+def _rms(values):
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return 1.0
@@ -301,9 +302,9 @@ def _rms(values: np.ndarray) -> float:
 # ==========================================================================
 # 3. Curvature  (Zhang et al., Rev. Sci. Instrum. 82, 043712 (2011))
 # ==========================================================================
-def curvature(values, axes, *, mode: str = "2d", a0: float = 1.0,
-              ratio: float = 1.0, window=None, poly: int = None,
-              normalise: bool = True, negate: bool = True):
+def curvature(values, axes, *, mode="2d", a0=1.0,
+              ratio=1.0, window=None, poly=None,
+              normalise=True, negate=True):
     """Curvature of the intensity surface, with a dimensionless ``a0``.
 
     ``mode`` is ``"2d"`` for the isotropic two-dimensional form (Fermi
@@ -376,7 +377,7 @@ def curvature(values, axes, *, mode: str = "2d", a0: float = 1.0,
     return -out if negate else out
 
 
-def suggest_a0(values, axes, *, mode: str = "2d", factor: float = 1.0) -> float:
+def suggest_a0(values, axes, *, mode="2d", factor=1.0):
     """A starting ``a0``: the mean square slope of the normalised surface.
 
     Zhang et al. recommend choosing ``a0`` near the scale of ``I'^2`` -- the
@@ -400,8 +401,8 @@ def suggest_a0(values, axes, *, mode: str = "2d", factor: float = 1.0) -> float:
     return float(max(scale, 1e-9) * float(factor))
 
 
-def gradient_enhance(values, axes, *, floor: float = 0.05, window=None,
-                     normalise: bool = True):
+def gradient_enhance(values, axes, *, floor=0.05, window=None,
+                     normalise=True):
     """``I / |grad I|``, the contrast trick from ``Gradient.m``, made safe.
 
     Two repairs. ``Gradient.m`` sums the squares of **eight** neighbour
@@ -438,14 +439,14 @@ def gradient_enhance(values, axes, *, floor: float = 0.05, window=None,
 @dataclass
 class SymmetryResult:
     """A symmetrised map and the evidence for judging it."""
-    values: np.ndarray
-    x: np.ndarray
-    y: np.ndarray
-    coverage: np.ndarray            # how many copies contributed per pixel
-    centre: tuple                   # the origin actually used
-    residual: float = 0.0           # RMS(sym - original) / RMS(original)
+    values: 'np.ndarray'
+    x: 'np.ndarray'
+    y: 'np.ndarray'
+    coverage: 'np.ndarray'            # how many copies contributed per pixel
+    centre: 'tuple'                   # the origin actually used
+    residual: 'float' = 0.0           # RMS(sym - original) / RMS(original)
 
-    def difference(self, original) -> np.ndarray:
+    def difference(self, original):
         """``symmetrised - original``, for the third panel of the three that
         should always be shown together."""
         return self.values - np.asarray(original, dtype=float)
@@ -484,7 +485,7 @@ def _bilinear(values, x_axis, y_axis, xq, yq):
     return out.reshape(np.shape(xq))
 
 
-def symmetry_operations(fold: int = 1, *, mirror_angles=(), inversion: bool = False):
+def symmetry_operations(fold=1, *, mirror_angles=(), inversion=False):
     """The list of (angle, mirror) operations a symmetrisation will apply.
 
     ``fold`` is the rotation order (``6`` for a hexagonal surface),
@@ -504,9 +505,9 @@ def symmetry_operations(fold: int = 1, *, mirror_angles=(), inversion: bool = Fa
     return ops
 
 
-def symmetrise(values, x_axis, y_axis, *, fold: int = 1, centre=(0.0, 0.0),
-               mirror_angles=(), inversion: bool = False,
-               sector=None) -> SymmetryResult:
+def symmetrise(values, x_axis, y_axis, *, fold=1, centre=(0.0, 0.0),
+               mirror_angles=(), inversion=False,
+               sector=None):
     """Average a map over its symmetry operations.
 
     The origin is ``centre``, and it is always the caller's. An automatic
@@ -553,7 +554,7 @@ def symmetrise(values, x_axis, y_axis, *, fold: int = 1, centre=(0.0, 0.0),
         sample = _bilinear(values, x_axis, y_axis,
                            cx + radius * np.cos(rad), cy + radius * np.sin(rad))
         good = np.isfinite(sample) & inside
-        total = np.where(good, total + np.nan_to_num(sample), total)
+        total = np.where(good, total + nan_to_num(sample), total)
         count = count + good
 
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -571,8 +572,8 @@ def symmetrise(values, x_axis, y_axis, *, fold: int = 1, centre=(0.0, 0.0),
 # ==========================================================================
 # 5. Background subtraction
 # ==========================================================================
-def shirley_background(energy, spectrum, *, iterations: int = 30,
-                       tol: float = 1e-6):
+def shirley_background(energy, spectrum, *, iterations=30,
+                       tol=1e-6):
     """The Shirley inelastic background of one spectrum.
 
     The background at each point is proportional to the total spectral
@@ -584,7 +585,7 @@ def shirley_background(energy, spectrum, *, iterations: int = 30,
     spectrum = np.asarray(spectrum, dtype=float)
     order = np.argsort(energy)
     e = energy[order]
-    y = np.nan_to_num(spectrum[order], nan=0.0)
+    y = nan_to_num(spectrum[order], nan=0.0)
     lo, hi = float(y[0]), float(y[-1])
     # The background has to *end* at each endpoint's own intensity: B(e0) =
     # y[0] and B(e_last) = y[-1], rising towards whichever side carries the
@@ -608,7 +609,7 @@ def shirley_background(energy, spectrum, *, iterations: int = 30,
     return out
 
 
-def tougaard_background(energy, spectrum, *, b: float = 2866.0, c: float = 1643.0):
+def tougaard_background(energy, spectrum, *, b=2866.0, c=1643.0):
     """The two-parameter Tougaard universal cross-section background.
 
     Physically better founded than Shirley for a wide energy window, and
@@ -620,7 +621,7 @@ def tougaard_background(energy, spectrum, *, b: float = 2866.0, c: float = 1643.
     spectrum = np.asarray(spectrum, dtype=float)
     order = np.argsort(energy)
     e = energy[order]
-    y = np.nan_to_num(spectrum[order], nan=0.0)
+    y = nan_to_num(spectrum[order], nan=0.0)
     step = np.gradient(e)
     background = np.zeros_like(y)
     for i in range(y.size):
@@ -632,8 +633,8 @@ def tougaard_background(energy, spectrum, *, b: float = 2866.0, c: float = 1643.
     return out
 
 
-def percentile_background(values, axes, dim: int, *, percentile: float = 5.0,
-                          smooth: float = 0.0):
+def percentile_background(values, axes, dim, *, percentile=5.0,
+                          smooth=0.0):
     """The angle-independent background: a low percentile across ``dim``.
 
     For each position along the other axis, take a low quantile of the
@@ -646,7 +647,7 @@ def percentile_background(values, axes, dim: int, *, percentile: float = 5.0,
     dim = int(dim) % 2
     level = np.nanpercentile(np.where(np.isfinite(values), values, np.nan),
                              float(percentile), axis=dim, keepdims=True)
-    level = np.nan_to_num(level, nan=0.0)
+    level = nan_to_num(level, nan=0.0)
     if smooth > 0:
         other = 1 - dim
         sigma = float(smooth) / axis_step(axes[other])
@@ -654,7 +655,7 @@ def percentile_background(values, axes, dim: int, *, percentile: float = 5.0,
     return np.broadcast_to(level, values.shape).copy()
 
 
-def polynomial_background(values, axes, *, order: int = 2, mask=None):
+def polynomial_background(values, axes, *, order=2, mask=None):
     """A smooth two-dimensional polynomial fitted to the whole image.
 
     ``mask`` restricts the fit to the pixels that are background (the
@@ -682,7 +683,7 @@ def polynomial_background(values, axes, *, order: int = 2, mask=None):
 BACKGROUNDS = ("shirley", "tougaard", "percentile", "polynomial")
 
 
-def subtract_background(values, axes, method: str, *, dim: int = 1, clip: bool = False,
+def subtract_background(values, axes, method, *, dim=1, clip=False,
                         **kwargs):
     """Compute and subtract one of the backgrounds above.
 
@@ -718,8 +719,8 @@ def subtract_background(values, axes, method: str, *, dim: int = 1, clip: bool =
 # ==========================================================================
 # 6. Fermi-Dirac division  (thin front for tools.fermi.divide_fermi)
 # ==========================================================================
-def divide_fermi_edge(values, axes, *, ef: float, temperature: float,
-                      resolution: float, dim: int = 1, cutoff_kt: float = 4.0):
+def divide_fermi_edge(values, axes, *, ef, temperature,
+                      resolution, dim=1, cutoff_kt=4.0):
     """Divide out the resolution-broadened Fermi cut-off along ``dim``.
 
     This is how the states just above E_F are shown -- they are there, at a
@@ -739,7 +740,7 @@ def divide_fermi_edge(values, axes, *, ef: float, temperature: float,
 # ==========================================================================
 # 7. Normalisation
 # ==========================================================================
-def normalise(values, axes, dim: int, *, mode: str = "area", window=None):
+def normalise(values, axes, dim, *, mode="area", window=None):
     """Divide every line along ``dim`` by its own scale.
 
     ``mode`` is ``"area"`` (the line's integral), ``"max"`` (its peak) or
@@ -783,8 +784,8 @@ def normalise(values, axes, dim: int, *, mode: str = "area", window=None):
 # ==========================================================================
 # 8. Despiking
 # ==========================================================================
-def despike(values, *, threshold: float = 6.0, size: int = 3,
-            scale: str = "poisson", replace: bool = True):
+def despike(values, *, threshold=6.0, size=3,
+            scale="poisson", replace=True):
     """Find and repair cosmic rays and dead pixels.
 
     A pixel is a spike when it differs from the median of its neighbourhood
@@ -838,18 +839,18 @@ def despike(values, *, threshold: float = 6.0, size: int = 3,
 @dataclass
 class Step:
     """One operation, recorded so the dataset can say how it was made."""
-    name: str
-    parameters: dict = field(default_factory=dict)
-    source: str = ""
+    name: 'str'
+    parameters: 'dict' = field(default_factory=dict)
+    source: 'str' = ""
 
-    def describe(self) -> str:
+    def describe(self):
         if not self.parameters:
             return self.name
         bits = ", ".join(f"{k}={_short(v)}" for k, v in sorted(self.parameters.items()))
         return f"{self.name}({bits})"
 
 
-def _short(value) -> str:
+def _short(value):
     if isinstance(value, float):
         return f"{value:.6g}"
     if isinstance(value, (list, tuple)):
@@ -857,7 +858,7 @@ def _short(value) -> str:
     return str(value)
 
 
-def history_of(data) -> list:
+def history_of(data):
     """Every processing step recorded on a dataset, oldest first.
 
     Read back off the ``proc.step.N`` keys in its info, so a dataset saved
@@ -876,7 +877,7 @@ def history_of(data) -> list:
     return [text for _, text in sorted(steps)]
 
 
-def record_step(source_info: dict, step: Step) -> dict:
+def record_step(source_info, step):
     """Return ``source_info`` plus one more step, ready for MemoryData.
 
     Numbered rather than appended to one string so the chain survives a

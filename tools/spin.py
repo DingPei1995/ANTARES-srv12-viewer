@@ -73,10 +73,9 @@ end station's FERRUM VLEED detector (Sci. Rep. 2023,
 doi:10.1038/s41598-023-40145-1); use the
 end station's own calibration where there is one.
 """
-from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 
@@ -89,24 +88,24 @@ _LABEL = re.compile(
 
 @dataclass
 class SpinChannel:
-    index: int
-    label: str
-    setting: str = ""
-    magnetisation: str = ""          # e.g. "+X"
-    axis: str = ""                   # "X", "Y" or "Z"; "" if unknown
-    sign: int = 0                    # +1 / -1; 0 if unknown
+    index: 'int'
+    label: 'str'
+    setting: 'str' = ""
+    magnetisation: 'str' = ""          # e.g. "+X"
+    axis: 'str' = ""                   # "X", "Y" or "Z"; "" if unknown
+    sign: 'int' = 0                    # +1 / -1; 0 if unknown
 
     @property
-    def usable(self) -> bool:
+    def usable(self):
         return bool(self.axis) and self.sign in (-1, 1)
 
     @property
-    def magnet_sign(self) -> int:
+    def magnet_sign(self):
         return -1 if self.magnetisation.startswith("-") else (
             1 if self.magnetisation.startswith("+") else 0)
 
 
-def parse_channel(index: int, label: str) -> SpinChannel:
+def parse_channel(index, label):
     """One ``SpinComp`` label as a :class:`SpinChannel`; unrecognised
     labels come back with no axis rather than a guessed one."""
     text = " ".join(str(label).split())
@@ -122,11 +121,11 @@ def parse_channel(index: int, label: str) -> SpinChannel:
                        sign=1 if match.group("sign") == "+" else -1)
 
 
-def parse_channels(labels) -> list:
+def parse_channels(labels):
     return [parse_channel(i, label) for i, label in enumerate(labels)]
 
 
-def channels_from_info(info: dict, n_channels: int) -> list:
+def channels_from_info(info, n_channels):
     """The channels of a spin dataset, from its ``spin.component.<n>``
     entries (or the channel names if those are missing)."""
     labels = []
@@ -139,7 +138,7 @@ def channels_from_info(info: dict, n_channels: int) -> list:
     return parse_channels(labels)
 
 
-def axes_available(channels) -> list:
+def axes_available(channels):
     """Every axis with at least one channel on each side, in X, Y, Z order."""
     out = []
     for axis in "XYZ":
@@ -149,7 +148,7 @@ def axes_available(channels) -> list:
     return out
 
 
-def pairs(channels, axis: str) -> list:
+def pairs(channels, axis):
     """``[(setting, plus_channel, minus_channel), ...]``: channels counted
     at the same manipulator setting with opposite sensitivity along
     ``axis``."""
@@ -166,7 +165,7 @@ def pairs(channels, axis: str) -> list:
     return out
 
 
-def design_report(channels, axis: str) -> dict:
+def design_report(channels, axis):
     """What cancels in the cross ratio for these channels.
 
     ``transmission`` -- each manipulator setting appears equally often on
@@ -191,30 +190,30 @@ def design_report(channels, axis: str) -> dict:
 # --------------------------------------------------------------------------
 @dataclass
 class SpinResult:
-    x: np.ndarray
-    axis: str
-    method: str
-    sherman: float
-    asymmetry: np.ndarray
-    sigma_asymmetry: np.ndarray
-    polarisation: np.ndarray
-    sigma_polarisation: np.ndarray
-    intensity: np.ndarray
-    up: np.ndarray
-    down: np.ndarray
-    sigma_up: np.ndarray
-    sigma_down: np.ndarray
+    x: 'np.ndarray'
+    axis: 'str'
+    method: 'str'
+    sherman: 'float'
+    asymmetry: 'np.ndarray'
+    sigma_asymmetry: 'np.ndarray'
+    polarisation: 'np.ndarray'
+    sigma_polarisation: 'np.ndarray'
+    intensity: 'np.ndarray'
+    up: 'np.ndarray'
+    down: 'np.ndarray'
+    sigma_up: 'np.ndarray'
+    sigma_down: 'np.ndarray'
     #: per manipulator setting: (A, σA), before any zero reference
-    pair_asymmetries: dict = field(default_factory=dict)
+    pair_asymmetries: 'dict' = field(default_factory=dict)
     #: weighted mean instrumental asymmetry and its error, if measurable
-    instrumental: tuple = None
+    instrumental: 'tuple' = None
     #: the log-ratio removed by the zero reference, 0 if none
-    zero_offset: float = 0.0
-    channels_used: list = field(default_factory=list)
-    design: dict = field(default_factory=dict)
-    notes: list = field(default_factory=list)
+    zero_offset: 'float' = 0.0
+    channels_used: 'list' = field(default_factory=list)
+    design: 'dict' = field(default_factory=dict)
+    notes: 'list' = field(default_factory=list)
 
-    def summary(self) -> str:
+    def summary(self):
         method = "cross ratio" if self.method == "cross" else self.method
         lines = [f"P_{self.axis} = A / S with S = {self.sherman:.3g}  "
                  f"({method})"]
@@ -270,9 +269,9 @@ def _log_ratio(plus_counts, minus_counts):
     return L, np.sqrt(var)
 
 
-def analyse(x, counts, channels, axis: str, *, sherman: float = DEFAULT_SHERMAN,
-            method: str = "cross", zero_region=None,
-            bin_factor: int = 1) -> SpinResult:
+def analyse(x, counts, channels, axis, *, sherman=DEFAULT_SHERMAN,
+            method="cross", zero_region=None,
+            bin_factor=1):
     """Polarisation along ``axis`` from a ``(n_points, n_channels)`` table
     of raw counts.
 

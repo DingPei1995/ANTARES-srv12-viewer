@@ -18,7 +18,6 @@ Deviations from the MATLAB originals are deliberate and noted at each
 function; they are all cases where the original's mechanics get in the way
 of the result rather than defining it.
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -31,7 +30,7 @@ except ImportError as exc:      # pragma: no cover - scipy is a hard dependency
 # --------------------------------------------------------------------------
 # Arbitrary-direction cut
 # --------------------------------------------------------------------------
-def _axis_step(axis) -> float:
+def _axis_step(axis):
     axis = np.asarray(axis, dtype=float)
     if axis.size < 2:
         return 1.0
@@ -123,7 +122,7 @@ def arbitrary_cut(x_axis, y_axis, z_axis, cube, points):
 # --------------------------------------------------------------------------
 # Fermi-surface correction
 # --------------------------------------------------------------------------
-def fit_feature(points, order: int = 2):
+def fit_feature(points, order=2):
     """Least-squares polynomial through the picked (angle, energy) points,
     as ``correction.m``'s ``polyfit(m, n, 2)``. Returns the coefficients,
     highest power first, ready for ``np.polyval``."""
@@ -155,7 +154,7 @@ def shift_bins(angle_axis, energy_axis, coeffs):
 
 
 def fs_correction(values, angle_axis, energy_axis, coeffs, *,
-                  angle_dim: int = 0, energy_dim: int = -1):
+                  angle_dim=0, energy_dim=-1):
     """Straighten a curved feature by shifting each angle column in energy.
 
     Works on a 2D frame (angle, energy) and on a 3D cube alike: ``angle_dim``

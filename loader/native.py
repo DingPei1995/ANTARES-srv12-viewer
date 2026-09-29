@@ -17,13 +17,13 @@ The reading itself is :func:`loader.nxs_file.load_soleil_nxs`, which already
 dispatches a native entry to its own parser; this class is the registry
 entry that makes that reachable by name and by detection.
 """
-from __future__ import annotations
 
-import h5py
+from compat import h5 as h5py
 
 from loader.nxs_file import HANDLES
 
-from loader.nxs_file import (NATIVE_ATTR, list_datasets, load_soleil_nxs)
+from loader.nxs_file import (NATIVE_ATTR, list_datasets, load_soleil_nxs,
+                             is_native_npz)
 from loader.registry import Loader, register
 
 
@@ -32,15 +32,17 @@ class NativeLoader(Loader):
     description = ("Datasets saved by this program, and everything in a "
                    "session folder. Detected automatically -- no need to "
                    "pick a beamline.")
-    #: Saving here writes .nxs, but a file that has been renamed, or moved
-    #: through a system that prefers .h5, is the same file and opens the same
-    #: way -- the format is recognised by a marker inside it, not by its name.
-    patterns = ("*.nxs", "*.h5", "*.hdf5")
+    #: Saving writes .npz (numpy's own compressed archive, readable with
+    #: nothing but numpy). .nxs / .h5 files saved by the earlier, h5py-based
+    #: version of this program are still read.
+    patterns = ("*.npz", "*.nxs", "*.h5", "*.hdf5")
     #: Above every beamline loader: this one *knows*, the others guess.
     priority = 100
 
-    def can_open(self, path: str) -> bool:
+    def can_open(self, path):
         """True if any top-level entry carries the native marker."""
+        if str(path).lower().endswith(".npz"):
+            return is_native_npz(path)
         try:
             with HANDLES.borrow(path) as f:
                 return any(NATIVE_ATTR in f[name].attrs
@@ -49,7 +51,7 @@ class NativeLoader(Loader):
         except Exception:
             return False
 
-    def list_entries(self, path: str) -> list:
+    def list_entries(self, path):
         """The entries, each carrying the name the dataset was saved under.
 
         A beamline file's row is named after the file, because that is all
@@ -61,6 +63,8 @@ class NativeLoader(Loader):
         as "007-gold Fermi surface.nxs".
         """
         entries = list_datasets(path)
+        if str(path).lower().endswith(".npz"):
+            return entries
         try:
             with HANDLES.borrow(path) as f:
                 for info in entries:
@@ -76,7 +80,7 @@ class NativeLoader(Loader):
             pass        # the names are a nicety; the entries are the point
         return entries
 
-    def load(self, path: str, entry: str = None):
+    def load(self, path, entry=None):
         # Deliberately no ``progress``: declaring it is what marks a reader
         # as one that expects to take long enough to need a progress bar,
         # and routes it through the worker thread. An HDF5 open is one call

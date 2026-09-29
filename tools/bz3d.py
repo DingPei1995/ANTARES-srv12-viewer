@@ -34,9 +34,8 @@ convex, any planar cut through it is a single convex polygon, so its points
 can just be angle-sorted around their own centroid -- simpler, and does not
 depend on tuning an epsilon for "these two points are the same vertex".
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 from scipy.spatial import ConvexHull, HalfspaceIntersection
@@ -50,13 +49,13 @@ class BrillouinZone:
     """A convex polyhedron: :attr:`faces` for drawing (each an ordered loop
     of vertices, already closed -- the first point is repeated at the end),
     :attr:`vertices` for bounding-box/tiling-range estimates."""
-    faces: list          # list of (n_i, 3) arrays, each face's vertices in order
-    vertices: np.ndarray  # (N, 3), the polyhedron's corner points
-    volume: float
-    shells_used: int
+    faces: 'list'          # list of (n_i, 3) arrays, each face's vertices in order
+    vertices: 'np.ndarray'  # (N, 3), the polyhedron's corner points
+    volume: 'float'
+    shells_used: 'int'
 
 
-def _face_loop(points: np.ndarray, normal: np.ndarray) -> np.ndarray:
+def _face_loop(points, normal):
     """Order a face's (unordered) vertices into a closed loop by angle
     around their centroid, using ``normal`` to fix a consistent winding.
     """
@@ -76,8 +75,8 @@ def _face_loop(points: np.ndarray, normal: np.ndarray) -> np.ndarray:
     return np.vstack([loop, loop[:1]])
 
 
-def _faces_from_halfspaces(verts: np.ndarray, normals: np.ndarray,
-                           offsets: np.ndarray, scale: float):
+def _faces_from_halfspaces(verts, normals,
+                           offsets, scale):
     """The polyhedron's faces, as ordered vertex loops: for each bounding
     plane ``normal . x = offset``, the vertices lying on it.
 
@@ -95,7 +94,7 @@ def _faces_from_halfspaces(verts: np.ndarray, normals: np.ndarray,
     return faces
 
 
-def face_planes(faces, tol: float = 1e-12):
+def face_planes(faces, tol=1e-12):
     """``(normals, offsets)`` of the planes a polyhedron's ``faces`` lie in,
     as unit normals pointing away from the origin (``normal . x = offset``
     with ``offset > 0``).
@@ -133,8 +132,8 @@ def face_planes(faces, tol: float = 1e-12):
     return np.array(normals), np.array(offsets)
 
 
-def wigner_seitz_cell(b: np.ndarray, max_shell: int = 5,
-                      rel_tol: float = 1e-9) -> BrillouinZone:
+def wigner_seitz_cell(b, max_shell=5,
+                      rel_tol=1e-9):
     """The first Brillouin zone of the reciprocal lattice spanned by ``b``
     (rows ``b1, b2, b3``): the Wigner-Seitz cell about the origin.
 
@@ -189,7 +188,7 @@ _SEED_DIRECTIONS = (
 )
 
 
-def irreducible_wedge(zone: BrillouinZone, operations) -> BrillouinZone:
+def irreducible_wedge(zone, operations):
     """The irreducible Brillouin zone: the part of ``zone`` from which the
     whole of it can be rebuilt by the crystal's own symmetry.
 
@@ -271,7 +270,7 @@ def irreducible_wedge(zone: BrillouinZone, operations) -> BrillouinZone:
                          shells_used=zone.shells_used)
 
 
-def plane_basis(normal: np.ndarray):
+def plane_basis(normal):
     """Two orthonormal in-plane axes (u, v) for the plane with this unit
     normal, matching the convention ``cut_brillouin.m``/``update_cut`` use
     (u, v pick themselves up from z-hat unless the normal already is
@@ -288,7 +287,7 @@ def plane_basis(normal: np.ndarray):
     return u, v
 
 
-def _project_and_sort(points: np.ndarray, normal: np.ndarray, point: np.ndarray):
+def _project_and_sort(points, normal, point):
     """Project coplanar 3-D ``points`` into the plane's own (u, v) basis and
     order them into a closed convex loop by angle about their centroid."""
     u_axis, v_axis = plane_basis(normal)
@@ -300,7 +299,7 @@ def _project_and_sort(points: np.ndarray, normal: np.ndarray, point: np.ndarray)
     return np.append(u, u[0]), np.append(v, v[0])
 
 
-def plane_cut(faces, normal: np.ndarray, point: np.ndarray, tol: float = 1e-9):
+def plane_cut(faces, normal, point, tol=1e-9):
     """The polygon where the plane through ``point`` with unit ``normal``
     cuts the convex polyhedron given by ``faces`` (as returned in
     :attr:`BrillouinZone.faces`, already translated to wherever this
@@ -357,7 +356,7 @@ def plane_cut(faces, normal: np.ndarray, point: np.ndarray, tol: float = 1e-9):
     return _project_and_sort(np.asarray(uniq), normal, point)
 
 
-def cut_points_3d(u, v, normal: np.ndarray, point: np.ndarray) -> np.ndarray:
+def cut_points_3d(u, v, normal, point):
     """Put a cut polygon back into 3-D: the inverse of the projection at the
     end of :func:`plane_cut`, for drawing the cut where it actually sits
     inside the zone (which is what the 3-D preview of the cut plane shows).
@@ -369,8 +368,8 @@ def cut_points_3d(u, v, normal: np.ndarray, point: np.ndarray) -> np.ndarray:
     return np.asarray(point, dtype=float) + u * u_axis + v * v_axis
 
 
-def tile_and_cut(zone: BrillouinZone, b: np.ndarray, normal: np.ndarray,
-                 point: np.ndarray, u_range, v_range, margin: int = 2):
+def tile_and_cut(zone, b, normal,
+                 point, u_range, v_range, margin=2):
     """The cut polygons of every translated copy of ``zone`` whose cut
     reaches within ``u_range``/``v_range`` (each a ``(lo, hi)`` pair, in the
     plane's own (u, v) coordinates from :func:`plane_basis`) of the plane

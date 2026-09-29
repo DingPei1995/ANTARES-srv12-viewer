@@ -15,7 +15,6 @@ throws the rest away, which on a photon-starved ARPES scan throws away most
 of the counts. Combining sums each block instead, so nothing is lost and the
 noise actually improves -- which is what "compress" is for here.
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -43,7 +42,7 @@ CONSTRUCTOR_AXES = {kind: slots["constructor"]
 # --------------------------------------------------------------------------
 # Shared
 # --------------------------------------------------------------------------
-def axis_index(axis, value, default: int) -> int:
+def axis_index(axis, value, default):
     """Index of ``value`` on ``axis``, the way the MATLAB tools resolve a
     "real scale" bound: round to the nearest step from the axis start.
 
@@ -61,7 +60,7 @@ def axis_index(axis, value, default: int) -> int:
     return int(round((float(value) - axis[0]) / step))
 
 
-def resolve_bounds(axis, lo, hi, by_index: bool):
+def resolve_bounds(axis, lo, hi, by_index):
     """Turn one axis's (lo, hi) request into a half-open index slice.
 
     ``by_index`` picks whether the numbers are 1-based indices (as the
@@ -87,7 +86,7 @@ def resolve_bounds(axis, lo, hi, by_index: bool):
 # --------------------------------------------------------------------------
 # Truncate
 # --------------------------------------------------------------------------
-def truncate(values, axes, bounds, by_index: bool = False):
+def truncate(values, axes, bounds, by_index=False):
     """Cut a rectangular piece out of the data (``td_demo.m``).
 
     ``axes`` is one array per dimension of ``values``; ``bounds`` is one
@@ -109,8 +108,8 @@ def truncate(values, axes, bounds, by_index: bool = False):
 # --------------------------------------------------------------------------
 # Self-normalisation
 # --------------------------------------------------------------------------
-def self_normalize(values, axes, dims, *, window=None, by_index: bool = False,
-                   to_peak: bool = False):
+def self_normalize(values, axes, dims, *, window=None, by_index=False,
+                   to_peak=False):
     """Divide the data by its own intensity, line by line or plane by plane.
 
     ``dims`` names the directions the normalisation runs *along*: one axis
@@ -210,7 +209,7 @@ def axis_summary(axis):
     return (float(axis.min()), float(axis.max()), int(axis.size), float(step))
 
 
-def same_format(shapes) -> bool:
+def same_format(shapes):
     """Whether several datasets can be put through the same operation.
 
     Identical means identical: same kind, same number of axes and the same

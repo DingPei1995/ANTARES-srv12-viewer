@@ -60,7 +60,6 @@ Points with ``kx^2 + ky^2 > |k|^2`` are outside the light cone and points
 whose angles fall outside the measured range were never recorded; both come
 back as NaN rather than as extrapolated values.
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -72,8 +71,8 @@ _H = 6.626176e-34
 K0_PER_SQRT_EV = np.sqrt(2.0 * _ME * _CE) * 2.0 * np.pi / _H / 1e10  # ~0.5123
 
 
-def rotation_matrix(theta_offset_deg: float, phi_offset_deg: float,
-                    azimuth_deg: float = 0.0) -> np.ndarray:
+def rotation_matrix(theta_offset_deg, phi_offset_deg,
+                    azimuth_deg=0.0):
     """``R = Rz @ Rx @ Ry`` exactly as the .m file builds it, including its
     sign conventions: theta and the azimuth are negated ("negative sign is
     just for user's habit"), phi is not.
@@ -102,8 +101,8 @@ def rotation_matrix(theta_offset_deg: float, phi_offset_deg: float,
     return rz @ rx @ ry
 
 
-def origin_rotation(theta_origin_deg: float, phi_origin_deg: float,
-                    azimuth_deg: float = 0.0) -> np.ndarray:
+def origin_rotation(theta_origin_deg, phi_origin_deg,
+                    azimuth_deg=0.0):
     """Rotation that sends the emission direction ``(theta, phi)`` to normal
     emission, i.e. puts that point at the k-space origin.
 
@@ -121,13 +120,13 @@ def origin_rotation(theta_origin_deg: float, phi_origin_deg: float,
     return rotation_matrix(-theta_origin_deg, -phi_origin_deg, azimuth_deg)
 
 
-def k0_of_energy(energy_eV) -> np.ndarray:
+def k0_of_energy(energy_eV):
     """Momentum magnitude |k| in A^-1 for a kinetic energy in eV."""
     energy = np.asarray(energy_eV, dtype=float)
     return K0_PER_SQRT_EV * np.sqrt(np.clip(energy, 0.0, None))
 
 
-def angle_grid_to_directions(theta_deg, phi_deg, R: np.ndarray):
+def angle_grid_to_directions(theta_deg, phi_deg, R):
     """Unit momentum directions for every point of the angle grid.
 
     Returns ``(kx1, ky1)``, each shaped ``(len(theta), len(phi))`` and
@@ -145,7 +144,7 @@ def angle_grid_to_directions(theta_deg, phi_deg, R: np.ndarray):
     return kx1, ky1
 
 
-def _scaled_range(values: np.ndarray, k0_min: float, k0_max: float):
+def _scaled_range(values, k0_min, k0_max):
     """Range of ``values * k0`` over the whole energy span.
 
     The .m file takes its lower bound only from the lowest-energy plane and
@@ -158,9 +157,9 @@ def _scaled_range(values: np.ndarray, k0_min: float, k0_max: float):
     return float(min(lo_candidates)), float(max(hi_candidates))
 
 
-def k_extent(theta_deg, phi_deg, energy_eV, *, theta_offset_deg: float = 0.0,
-             phi_offset_deg: float = 0.0, azimuth_deg: float = 0.0,
-             energy_offset_eV: float = 0.0):
+def k_extent(theta_deg, phi_deg, energy_eV, *, theta_offset_deg=0.0,
+             phi_offset_deg=0.0, azimuth_deg=0.0,
+             energy_offset_eV=0.0):
     """The (kx, ky) box :func:`convert_map` would produce for these settings.
 
     Split out of the conversion so the dialog can answer "how many points is
@@ -180,7 +179,7 @@ def k_extent(theta_deg, phi_deg, energy_eV, *, theta_offset_deg: float = 0.0,
     return kx_lo, kx_hi, ky_lo, ky_hi
 
 
-def points_to_azimuth(points) -> float:
+def points_to_azimuth(points):
     """The smallest sample rotation that stands a picked direction upright.
 
     Give it two points on the constant-energy contour and it returns the
@@ -221,7 +220,7 @@ def points_to_azimuth(points) -> float:
     return _fold_to_right_angle(rotation)
 
 
-def _fold_to_right_angle(rotation: float, tol: float = 1e-9) -> float:
+def _fold_to_right_angle(rotation, tol=1e-9):
     """Fold a rotation into (-90, 90], the range of an undirected line.
 
     Written the way it is so that a tie lands on +90 rather than -90: a
@@ -242,7 +241,7 @@ def _fold_to_right_angle(rotation: float, tol: float = 1e-9) -> float:
     return float(folded) + 0.0      # normalise -0.0, which prints as "-0.000"
 
 
-def _resample_energy(cube: np.ndarray, energy: np.ndarray, n_energy: int):
+def _resample_energy(cube, energy, n_energy):
     """Linearly resample the cube along its energy axis."""
     if n_energy is None or n_energy == energy.size:
         return cube, energy
@@ -261,12 +260,12 @@ def _resample_energy(cube: np.ndarray, energy: np.ndarray, n_energy: int):
 
 
 def convert_map(theta_deg, phi_deg, energy_eV, cube, *,
-                theta_offset_deg: float = 0.0,
-                phi_offset_deg: float = 0.0,
-                azimuth_deg: float = 0.0,
-                energy_offset_eV: float = 0.0,
-                n_kx: int = 100, n_ky: int = 100,
-                n_energy: int = None,
+                theta_offset_deg=0.0,
+                phi_offset_deg=0.0,
+                azimuth_deg=0.0,
+                energy_offset_eV=0.0,
+                n_kx=100, n_ky=100,
+                n_energy=None,
                 progress=None):
     """Convert an angle-space Map cube to a regular (kx, ky, E) grid.
 
@@ -362,11 +361,11 @@ def convert_map(theta_deg, phi_deg, energy_eV, cube, *,
 
 
 def convert_map_forward_reference(theta_deg, phi_deg, energy_eV, cube, *,
-                                  theta_offset_deg: float = 0.0,
-                                  phi_offset_deg: float = 0.0,
-                                  azimuth_deg: float = 0.0,
-                                  energy_offset_eV: float = 0.0,
-                                  n_kx: int = 100, n_ky: int = 100):
+                                  theta_offset_deg=0.0,
+                                  phi_offset_deg=0.0,
+                                  azimuth_deg=0.0,
+                                  energy_offset_eV=0.0,
+                                  n_kx=100, n_ky=100):
     """The .m file's own route -- forward-map the angle grid, then scatter
     interpolate -- kept as a cross-check for :func:`convert_map`.
 

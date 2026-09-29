@@ -27,11 +27,13 @@ seen and quoted, and its absence can be seen too.
 3.8155 eV*A^2 for hbar^2/2m_e. The value is 3.80998 eV*A^2, so every mass it
 has ever reported is 0.15% low. Small, but free to fix.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
+
+#: numpy 2 renamed trapz; either spelling, whichever this numpy has.
+_trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
 #: hbar^2 / 2 m_e, in eV * A^2. E = HBAR2_OVER_2M * k^2 / (m*/m_e).
 HBAR2_OVER_2M = 3.80998212
@@ -44,16 +46,16 @@ VELOCITY_FACTOR = 1e-10 / HBAR_EVS
 @dataclass
 class Dispersion:
     """A polynomial through a band, with what it implies."""
-    coefficients: np.ndarray             # highest power first, E(k)
-    errors: np.ndarray
-    order: int
-    k: np.ndarray
-    energy: np.ndarray
-    sigma: np.ndarray                    # the effective energy error used
-    model: np.ndarray
-    chi2: float = float("nan")
-    error_axis: str = "y"
-    covariance: np.ndarray = None
+    coefficients: 'np.ndarray'             # highest power first, E(k)
+    errors: 'np.ndarray'
+    order: 'int'
+    k: 'np.ndarray'
+    energy: 'np.ndarray'
+    sigma: 'np.ndarray'                    # the effective energy error used
+    model: 'np.ndarray'
+    chi2: 'float' = float("nan")
+    error_axis: 'str' = "y"
+    covariance: 'np.ndarray' = None
 
     def value(self, k):
         return np.polyval(self.coefficients, np.asarray(k, dtype=float))
@@ -62,7 +64,7 @@ class Dispersion:
         return np.polyval(np.polyder(self.coefficients),
                           np.asarray(k, dtype=float))
 
-    def _slope_error(self, k: float) -> float:
+    def _slope_error(self, k):
         """Error on dE/dk at one k, from the full covariance.
 
         The derivative is a linear combination of the coefficients, so its
@@ -77,13 +79,13 @@ class Dispersion:
         variance = float(powers @ self.covariance @ powers)
         return float(np.sqrt(max(variance, 0.0)))
 
-    def fermi_velocity(self, k_f: float = None):
+    def fermi_velocity(self, k_f=None):
         """``(dE/dk, error)`` at ``k_f``, in eV*A."""
         if k_f is None:
             k_f = float(np.mean(self.k))
         return float(self.slope(k_f)), self._slope_error(k_f)
 
-    def velocity_ms(self, k_f: float = None):
+    def velocity_ms(self, k_f=None):
         value, error = self.fermi_velocity(k_f)
         return value * VELOCITY_FACTOR, error * VELOCITY_FACTOR
 
@@ -115,7 +117,7 @@ class Dispersion:
         k = float(-self.coefficients[1] / (2.0 * self.coefficients[0]))
         return k, float(self.value(k))
 
-    def crossing(self, level: float = 0.0):
+    def crossing(self, level=0.0):
         """Where the band crosses ``level`` (k_F for level = E_F)."""
         roots = np.roots(np.asarray(self.coefficients, dtype=float)
                          - np.append(np.zeros(self.order), float(level)))
@@ -123,7 +125,7 @@ class Dispersion:
         inside = [r for r in real if self.k.min() - 1e-9 <= r <= self.k.max() + 1e-9]
         return sorted(inside) if inside else sorted(real)
 
-    def summary(self) -> str:
+    def summary(self):
         lines = []
         value, error = self.fermi_velocity()
         speed, speed_error = self.velocity_ms()
@@ -143,7 +145,7 @@ class Dispersion:
 
 
 def fit_dispersion(k, energy, *, k_error=None, energy_error=None,
-                   order: int = 1, iterations: int = 3) -> Dispersion:
+                   order=1, iterations=3):
     """Fit ``E(k)`` as a polynomial, weighted by whichever error is real.
 
     Give ``k_error`` for a band from MDC fits and ``energy_error`` for one
@@ -201,15 +203,15 @@ def fit_dispersion(k, energy, *, k_error=None, energy_error=None,
 @dataclass
 class WindowScan:
     """How a velocity or a mass moves with the fitting window."""
-    widths: np.ndarray
-    values: np.ndarray
-    errors: np.ndarray
-    counts: np.ndarray
-    quantity: str = "velocity"
-    axis: str = "energy"
-    centre: float = 0.0
+    widths: 'np.ndarray'
+    values: 'np.ndarray'
+    errors: 'np.ndarray'
+    counts: 'np.ndarray'
+    quantity: 'str' = "velocity"
+    axis: 'str' = "energy"
+    centre: 'float' = 0.0
 
-    def plateau(self, tolerance: float = 0.05):
+    def plateau(self, tolerance=0.05):
         """How far the window can be opened before the answer moves, as
         ``(first, last)`` indices into :attr:`widths`.
 
@@ -236,7 +238,7 @@ class WindowScan:
         """
         return self._plateau(tolerance)
 
-    def _plateau(self, tolerance: float, n_sigma: float = 2.0):
+    def _plateau(self, tolerance, n_sigma=2.0):
         finite = np.flatnonzero(np.isfinite(self.values))
         if finite.size < 2:
             return None
@@ -259,7 +261,7 @@ class WindowScan:
             last = index
         return (start, last) if last > start else None
 
-    def plateau_value(self, tolerance: float = 0.05):
+    def plateau_value(self, tolerance=0.05):
         """``(value, error, widest_window)`` over the anchored plateau, or
         None. The error is the smallest on the plateau -- the widest window
         that is still honest -- rather than a combination that would pretend
@@ -276,8 +278,8 @@ class WindowScan:
 
 
 def window_scan(k, energy, *, k_error=None, energy_error=None,
-                quantity: str = "velocity", centre: float = 0.0,
-                widths=None, order: int = None, minimum: int = 5) -> WindowScan:
+                quantity="velocity", centre=0.0,
+                widths=None, order=None, minimum=5):
     """Refit over a family of windows and report how the answer moves.
 
     ``quantity`` is ``"velocity"`` -- a straight line over an energy window
@@ -340,15 +342,15 @@ def window_scan(k, energy, *, k_error=None, energy_error=None,
 @dataclass
 class SelfEnergy:
     """``Re Sigma`` and ``Im Sigma`` from an MDC series and a bare band."""
-    energy: np.ndarray
-    real: np.ndarray
-    real_error: np.ndarray
-    imaginary: np.ndarray
-    imaginary_error: np.ndarray
-    bare: Dispersion = None
-    kk_real: np.ndarray = None
+    energy: 'np.ndarray'
+    real: 'np.ndarray'
+    real_error: 'np.ndarray'
+    imaginary: 'np.ndarray'
+    imaginary_error: 'np.ndarray'
+    bare: 'Dispersion' = None
+    kk_real: 'np.ndarray' = None
 
-    def consistency(self) -> float:
+    def consistency(self):
         """RMS difference between ``Re Sigma`` and the Kramers-Kronig
         transform of ``Im Sigma``, relative to the size of ``Re Sigma``.
 
@@ -379,14 +381,14 @@ def kramers_kronig(energy, imaginary):
         take[i] = False
         if take.sum() < 2:
             continue
-        out[i] = np.trapezoid(im[take] / (e[take] - e[i]), e[take]) / np.pi
+        out[i] = _trapezoid(im[take] / (e[take] - e[i]), e[take]) / np.pi
     result = np.full(energy.shape, np.nan)
     result[order] = out
     return result
 
 
-def self_energy(series, bare: Dispersion, *, band: int = 0,
-                resolution: float = 0.0) -> SelfEnergy:
+def self_energy(series, bare, *, band=0,
+                resolution=0.0):
     """Extract the self-energy from a fitted MDC series and a bare band.
 
     ``Re Sigma(E) = E - eps_bare(k(E))`` and
@@ -419,7 +421,7 @@ def self_energy(series, bare: Dispersion, *, band: int = 0,
     return SelfEnergy(e, real, real_error, imaginary, imaginary_error, bare, kk)
 
 
-def bare_band_from_anchors(k, energy, anchors, *, order: int = 1) -> Dispersion:
+def bare_band_from_anchors(k, energy, anchors, *, order=1):
     """A bare band through chosen anchor points.
 
     The bare band is an assumption, not a measurement, and the usual way to
