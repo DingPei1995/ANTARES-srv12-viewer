@@ -17,7 +17,6 @@ binning by averaging, applied to an uncertainty column, would make it
 smaller by the wrong factor. Everything here knows which columns are
 errors and propagates them.
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -34,7 +33,7 @@ BACKGROUNDS = ("constant", "linear", "shirley")
 # --------------------------------------------------------------------------
 # Channel bookkeeping
 # --------------------------------------------------------------------------
-def channel_names(info: dict, n_channels: int, kind: str = "") -> list:
+def channel_names(info, n_channels, kind=""):
     """The channel names recorded with a dataset, or numbered defaults.
 
     A plain EDC or MDC with no names is one channel called after its kind;
@@ -51,24 +50,24 @@ def channel_names(info: dict, n_channels: int, kind: str = "") -> list:
     return [f"channel {i}" for i in range(n_channels)]
 
 
-def value_label(info: dict) -> str:
+def value_label(info):
     return str((info or {}).get("curve.value_label", "") or "Intensity")
 
 
-def is_sigma(name: str) -> bool:
+def is_sigma(name):
     return str(name).startswith(SIGMA_PREFIX)
 
 
-def sigma_name(name: str) -> str:
+def sigma_name(name):
     return SIGMA_PREFIX + str(name)
 
 
-def data_channels(names) -> list:
+def data_channels(names):
     """Indices of the channels that are data rather than uncertainties."""
     return [i for i, name in enumerate(names) if not is_sigma(name)]
 
 
-def sigma_of(names, index: int):
+def sigma_of(names, index):
     """Index of the uncertainty channel belonging to channel ``index``, or
     None."""
     wanted = sigma_name(names[index])
@@ -78,20 +77,20 @@ def sigma_of(names, index: int):
     return None
 
 
-def looks_like_counts(values) -> bool:
+def looks_like_counts(values):
     finite = np.asarray(values, dtype=float)
     finite = finite[np.isfinite(finite)]
     return bool(finite.size and finite.min() >= 0
                 and np.all(np.abs(finite - np.round(finite)) < 1e-6))
 
 
-def curve_info(names, value_text: str) -> dict:
+def curve_info(names, value_text):
     """The metadata entries that describe a table's channels."""
     return {"curve.channels": CHANNEL_SEPARATOR.join(str(n) for n in names),
             "curve.value_label": str(value_text)}
 
 
-def table(x, columns) -> "tuple[np.ndarray, np.ndarray, list]":
+def table(x, columns):
     """``(x, values, names)`` from ``[(name, array), ...]``, with the
     table sorted so ``x`` ascends."""
     x = np.asarray(x, dtype=float).reshape(-1)
@@ -107,7 +106,7 @@ def table(x, columns) -> "tuple[np.ndarray, np.ndarray, list]":
 # --------------------------------------------------------------------------
 # Operations. Each takes and returns (x, values, names).
 # --------------------------------------------------------------------------
-def crop(x, values, names, lo: float, hi: float):
+def crop(x, values, names, lo, hi):
     x = np.asarray(x, dtype=float)
     keep = (x >= min(lo, hi)) & (x <= max(lo, hi))
     if keep.sum() < 2:
@@ -115,7 +114,7 @@ def crop(x, values, names, lo: float, hi: float):
     return x[keep], np.asarray(values, dtype=float)[keep], list(names)
 
 
-def rebin(x, values, names, factor: int, how: str = "sum"):
+def rebin(x, values, names, factor, how="sum"):
     """Merge every ``factor`` neighbouring points.
 
     ``how="sum"`` keeps counts as counts, so their Poisson statistics still
@@ -159,8 +158,8 @@ def _region_mask(x, region):
     return mask
 
 
-def normalise(x, values, names, how: str = "max", region=None,
-              together: bool = True):
+def normalise(x, values, names, how="max", region=None,
+              together=True):
     """Divide by the maximum, the area, or the mean over a region.
 
     ``together=True`` uses **one** factor for every data channel -- the one
@@ -199,7 +198,7 @@ def normalise(x, values, names, how: str = "max", region=None,
     return x, values, list(names), factors
 
 
-def subtract_background(x, values, names, how: str = "constant",
+def subtract_background(x, values, names, how="constant",
                         region=None):
     """Subtract a background from every data channel.
 
@@ -235,7 +234,7 @@ def subtract_background(x, values, names, how: str = "constant",
     return x, values, list(names), backgrounds
 
 
-def shift_x(x, delta: float):
+def shift_x(x, delta):
     return np.asarray(x, dtype=float) - float(delta)
 
 

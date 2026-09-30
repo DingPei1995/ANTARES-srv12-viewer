@@ -8,5 +8,6 @@ program's own saved format and the lazy arrays that keep a measurement on
 disk; ``session`` is where a computed dataset is written the moment it
 exists.
 
-Nothing in here imports Qt.
+Nothing in here imports a GUI toolkit (or h5py: HDF5 is read through
+``compat.h5``, a pure-Python reader).
 """

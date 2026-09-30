@@ -30,7 +30,6 @@ for a twist in [0, 30] degrees (see :func:`moire_reciprocal_vectors` for why
 the closed form is only valid up to 30 degrees, and the general method is
 not).
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -39,7 +38,7 @@ from tools.bz2d import reciprocal_vectors_2d, wigner_seitz_cell_2d
 __all__ = ["hex_moire_lattice_fast", "moire_reciprocal_vectors", "moire_bz"]
 
 
-def hex_moire_lattice_fast(a_top: float, a_bot: float, twist_deg: float):
+def hex_moire_lattice_fast(a_top, a_bot, twist_deg):
     """Moire real-space lattice constant and orientation for two hexagonal
     layers, ported from ``moire_lattice.m``/``MiniBZ_plotter.m``'s
     ``Plot_MiniBZ_Callback``.
@@ -99,7 +98,7 @@ def _mini_bz_rotation(top_rotation_deg, bottom_rotation_deg, lattice):
     return float(np.degrees(np.arccos(np.dot(v, [1.0, 0.0]) / np.linalg.norm(v))))
 
 
-def moire_reciprocal_vectors(g1_top, g2_top, g1_bot, g2_bot, search: int = 1):
+def moire_reciprocal_vectors(g1_top, g2_top, g1_bot, g2_bot, search=1):
     """The moire superlattice's primitive reciprocal vectors, for two
     layers of *any* 2-D lattice type, lattice constant and relative
     rotation -- the two shortest linearly independent vectors among
@@ -182,7 +181,7 @@ def moire_reciprocal_vectors(g1_top, g2_top, g1_bot, g2_bot, search: int = 1):
         "commensurate along one direction; try a larger `search`.")
 
 
-def moire_bz(g1_top, g2_top, g1_bot, g2_bot, search: int = 1):
+def moire_bz(g1_top, g2_top, g1_bot, g2_bot, search=1):
     """The moire Brillouin zone: :func:`moire_reciprocal_vectors` followed
     by :func:`tools.bz2d.wigner_seitz_cell_2d`. Returns ``(gm1, gm2,
     polygon)``.

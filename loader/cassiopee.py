@@ -43,12 +43,11 @@ they occur. The most important ones, in one place:
 
 Nothing in here imports Qt.
 """
-from __future__ import annotations
 
 import os
 import re
 import warnings
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 
@@ -105,19 +104,19 @@ class ScientaRegion:
     row-per-energy layout, and the orientation the rest of this program
     calls a ``cut``.
     """
-    name: str
-    energy: np.ndarray
-    angle: np.ndarray
-    values: np.ndarray
-    energy_label: str = "Kinetic energy (eV)"
-    angle_label: str = "Angle (deg)"
-    info: dict = field(default_factory=dict)
+    name: 'str'
+    energy: 'np.ndarray'
+    angle: 'np.ndarray'
+    values: 'np.ndarray'
+    energy_label: 'str' = "Kinetic energy (eV)"
+    angle_label: 'str' = "Angle (deg)"
+    info: 'dict' = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
 # Reading one spectrum
 # --------------------------------------------------------------------------
-def _read_lines(path: str):
+def _read_lines(path):
     # latin-1 rather than utf-8: these are written by Windows acquisition
     # software and the comment fields occasionally carry a stray byte that
     # utf-8 refuses. Nothing here depends on the text beyond ASCII.
@@ -149,11 +148,11 @@ def _fields(lines, span):
     return out
 
 
-def _numbers(text: str) -> np.ndarray:
+def _numbers(text):
     return np.array(text.split(), dtype=float) if text.strip() else np.zeros(0)
 
 
-def _is_numeric_row(line: str, least: int = 2) -> bool:
+def _is_numeric_row(line, least=2):
     """Is this line a row of the data block?
 
     A row is ``energy`` followed by one count per angle channel, all
@@ -173,7 +172,7 @@ def _is_numeric_row(line: str, least: int = 2) -> bool:
     return True
 
 
-def _data_block(lines, sections, number: str):
+def _data_block(lines, sections, number):
     """The line range holding region ``number``'s counts.
 
     Two writers, two layouts, and the difference is not announced anywhere
@@ -217,7 +216,7 @@ def _data_block(lines, sections, number: str):
     return (start, end)
 
 
-def _maybe_numbers(text: str):
+def _maybe_numbers(text):
     """The numbers in ``text``, or ``None`` if it is not numeric.
 
     Used for the parameter file, where a field that is written as words --
@@ -230,7 +229,7 @@ def _maybe_numbers(text: str):
         return None
 
 
-def _decimals_needed(value: float, most: int = 9) -> int:
+def _decimals_needed(value, most=9):
     """The fewest decimal places that write ``value`` exactly."""
     for decimals in range(most + 1):
         scaled = value * (10.0 ** decimals)
@@ -239,7 +238,7 @@ def _decimals_needed(value: float, most: int = 9) -> int:
     return most
 
 
-def _print_quantum(values: np.ndarray) -> float:
+def _print_quantum(values):
     """The coarsest grid the numbers could have been *printed* on.
 
     A value written out to a finite precision cannot be further than half a
@@ -276,8 +275,8 @@ def _print_quantum(values: np.ndarray) -> float:
     return 10.0 ** (largest - figures + 1)
 
 
-def _regularise(axis: np.ndarray, name: str, path: str,
-                tolerance: float = 0.05) -> np.ndarray:
+def _regularise(axis, name, path,
+                tolerance=0.05):
     """Replace an axis by the straight line through it.
 
     The scales are printed to fixed precision, so the steps carry rounding
@@ -315,7 +314,7 @@ def _regularise(axis: np.ndarray, name: str, path: str,
     return straight
 
 
-def _median_filter_2(values: np.ndarray) -> np.ndarray:
+def _median_filter_2(values):
     """The two-point median filter the MATLAB loader applied to every
     spectrum, along both axes.
 
@@ -339,8 +338,8 @@ def _median_filter_2(values: np.ndarray) -> np.ndarray:
     return out
 
 
-def parse_scienta(path: str, median_filter: bool = False,
-                  regularise: bool = True) -> "list[ScientaRegion]":
+def parse_scienta(path, median_filter=False,
+                  regularise=True):
     """Every region of a Scienta text file.
 
     Usually one, but the format numbers them (``[Region 1]``, ``[Data 1]``,
@@ -405,7 +404,7 @@ def parse_scienta(path: str, median_filter: bool = False,
     return regions
 
 
-def _axis_label(raw: str, fallback: str) -> str:
+def _axis_label(raw, fallback):
     """"Kinetic Energy [eV]" -> "Kinetic Energy (eV)". The viewers print the
     label verbatim, and the rest of this program writes units in brackets."""
     if not raw:
@@ -413,8 +412,8 @@ def _axis_label(raw: str, fallback: str) -> str:
     return raw.replace("[", "(").replace("]", ")").strip()
 
 
-def _spectrum_info(info: dict, header: dict, path: str,
-                   median_filter: bool) -> dict:
+def _spectrum_info(info, header, path,
+                   median_filter):
     """The acquisition settings, under names the information panel can show.
 
     Everything in ``[Info n]`` is kept, prefixed, rather than a chosen few:
@@ -443,7 +442,7 @@ def _spectrum_info(info: dict, header: dict, path: str,
 # --------------------------------------------------------------------------
 # The parameter file that sits beside each spectrum
 # --------------------------------------------------------------------------
-def parameter_path(spectrum_path: str) -> "str | None":
+def parameter_path(spectrum_path):
     """The ``_i`` file beside a ``_ROI<n>_`` spectrum, if it is there.
 
     The pair is ``<base>_<number>_ROI1_.txt`` and ``<base>_<number>_i.txt``:
@@ -461,7 +460,7 @@ def parameter_path(spectrum_path: str) -> "str | None":
     return path if os.path.isfile(path) else None
 
 
-def _split_parameter_line(line: str):
+def _split_parameter_line(line):
     """``"Polarisation [0:LV, 1:LH] : 1"`` -> ``("Polarisation [...]", "1")``.
 
     The separator is the first colon *outside* any brackets. Splitting on the
@@ -480,7 +479,7 @@ def _split_parameter_line(line: str):
     return None, None
 
 
-def read_parameter_file(path: str) -> dict:
+def read_parameter_file(path):
     """Motor positions and beamline readbacks from an ``_i`` file.
 
     Split on the colon rather than at fixed character positions (which is
@@ -521,7 +520,7 @@ def read_parameter_file(path: str) -> dict:
 # --------------------------------------------------------------------------
 # The work-function calibration
 # --------------------------------------------------------------------------
-def work_function(photon_energy_eV: float) -> float:
+def work_function(photon_energy_eV):
     """The analyser work function at this photon energy.
 
     Interpolated through :data:`ANALYSER_WORK_FUNCTION` with a cubic spline,
@@ -557,7 +556,7 @@ def work_function(photon_energy_eV: float) -> float:
 SERIES_PATTERN = re.compile(r"^(?P<base>.+)_(?P<index>\d+)_ROI(?P<roi>\d+)_?$")
 
 
-def series_members(path: str):
+def series_members(path):
     """Every spectrum of the numbered series ``path`` belongs to, in order.
 
     Returns ``[(index, spectrum path), ...]``, or ``[]`` if this file is not
@@ -599,7 +598,7 @@ SERIES_TITLES = {
 }
 
 
-def series_kind(path: str) -> str:
+def series_kind(path):
     """What the folder ``path`` belongs to is: ``"theta"``, ``"hv"`` or
     ``"index"`` -- without reading a single spectrum.
 
@@ -625,7 +624,7 @@ def series_kind(path: str) -> str:
     return _stepped_axis(thetas, photon_energies, len(members))[3]
 
 
-def _member_scan(path: str, median_filter: bool):
+def _member_scan(path, median_filter):
     """One member of a series: its region, plus the parameters beside it."""
     regions = parse_scienta(path, median_filter=median_filter)
     if not regions:
@@ -635,7 +634,7 @@ def _member_scan(path: str, median_filter: bool):
     return region, parameters
 
 
-def _even_steps(values: np.ndarray) -> np.ndarray:
+def _even_steps(values):
     """The evenly stepped axis the series was *meant* to be measured on.
 
     A scan steps one motor by a fixed amount, so the axis is even by
@@ -684,8 +683,8 @@ def _stepped_axis(thetas, photon_energies, count):
             "index")
 
 
-def load_series(path: str, median_filter: bool = False, progress=None,
-                energy_reference: str = "common") -> NxsScan:
+def load_series(path, median_filter=False, progress=None,
+                energy_reference="common"):
     """Assemble the numbered series ``path`` belongs to into one map.
 
     The result is an ordinary ``map``: first axis whatever was stepped,
@@ -969,8 +968,8 @@ def _refer_to_fermi_level(cube, energies, photon_energies,
     return out, axis, "E - E_F (eV)", notes
 
 
-def load_cut(path: str, region_index: int = 0,
-             median_filter: bool = False) -> NxsScan:
+def load_cut(path, region_index=0,
+             median_filter=False):
     """One spectrum as a ``cut``: analyser angle against energy."""
     regions = parse_scienta(path, median_filter=median_filter)
     if not regions:
@@ -1006,7 +1005,7 @@ class CassiopeeLoader(Loader):
     patterns = ("*.txt",)
     priority = 20
 
-    def can_open(self, path: str) -> bool:
+    def can_open(self, path):
         """Recognised by content: a Scienta axis scale in the first few lines.
 
         The parameter files that sit beside the spectra are also ``.txt`` and
@@ -1030,7 +1029,7 @@ class CassiopeeLoader(Loader):
             return False
         return SCIENTA_MARKER.encode("latin-1") in head
 
-    def list_entries(self, path: str) -> list:
+    def list_entries(self, path):
         """The whole folder first, then this one spectrum.
 
         A numbered folder here is *one measurement* -- the map is the point
@@ -1074,8 +1073,8 @@ class CassiopeeLoader(Loader):
             })
         return entries
 
-    def __init__(self, median_filter: bool = False,
-                 energy_reference: str = "common"):
+    def __init__(self, median_filter=False,
+                 energy_reference="common"):
         #: Off, for the reason in the module docstring: filtering raw counts
         #: invisibly at load time is a processing step nobody downstream can
         #: see. The Process panel's despiking is the same operation, visible
@@ -1087,7 +1086,7 @@ class CassiopeeLoader(Loader):
         #: see :data:`ENERGY_REFERENCES`.
         self.energy_reference = energy_reference
 
-    def load(self, path: str, entry: str = None, progress=None):
+    def load(self, path, entry=None, progress=None):
         if entry == "series":
             return load_series(path, median_filter=self.median_filter,
                                progress=progress,

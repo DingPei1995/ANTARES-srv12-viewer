@@ -53,7 +53,6 @@ free of the diagonal smearing a scattered/Delaunay interpolation puts into
 a Fermi edge. (The MATLAB file builds an ``ii*jj`` point list and calls
 ``griddata``, which mixes neighbouring energies into every output point.)
 """
-from __future__ import annotations
 
 import numpy as np
 
@@ -70,9 +69,9 @@ K_RADIAL_LABEL = "k from Γ (Å⁻¹)"
 # --------------------------------------------------------------------------
 # Geometry
 # --------------------------------------------------------------------------
-def cut_directions(slit_deg, *, deflector_deg: float,
-                   gamma_deflector_deg: float = 0.0,
-                   gamma_slit_deg: float = 0.0, azimuth_deg: float = 0.0):
+def cut_directions(slit_deg, *, deflector_deg,
+                   gamma_deflector_deg=0.0,
+                   gamma_slit_deg=0.0, azimuth_deg=0.0):
     """Unit momentum directions along the cut, with Gamma at the origin.
 
     Returns ``(along, across, unit)``: the component of each slit angle's
@@ -105,9 +104,9 @@ def cut_directions(slit_deg, *, deflector_deg: float,
     return along, across, unit
 
 
-def cut_momenta(slit_deg, energy_eV, *, deflector_deg: float,
-                gamma_deflector_deg: float = 0.0, gamma_slit_deg: float = 0.0,
-                azimuth_deg: float = 0.0, energy_offset_eV: float = 0.0):
+def cut_momenta(slit_deg, energy_eV, *, deflector_deg,
+                gamma_deflector_deg=0.0, gamma_slit_deg=0.0,
+                azimuth_deg=0.0, energy_offset_eV=0.0):
     """``(k_par, k_perp)``, each ``(n_slit, n_energy)`` in A^-1.
 
     ``k_par`` is measured from Gamma's projection onto the cut -- it is the
@@ -132,7 +131,7 @@ def _signed_radius(k_par, k_perp):
     return np.sign(k_par) * np.hypot(k_par, k_perp)
 
 
-def cut_extent(slit_deg, energy_eV, *, radial: bool = False, trim: bool = False,
+def cut_extent(slit_deg, energy_eV, *, radial=False, trim=False,
                **geometry):
     """The k range :func:`convert_cut` would produce, so a resolution in
     A^-1 can be turned into a point count before anything is converted."""
@@ -150,7 +149,7 @@ def cut_extent(slit_deg, energy_eV, *, radial: bool = False, trim: bool = False,
 # --------------------------------------------------------------------------
 # Conversion
 # --------------------------------------------------------------------------
-def _resample_energy(values: np.ndarray, energy: np.ndarray, n_energy):
+def _resample_energy(values, energy, n_energy):
     """Linearly resample ``(n_slit, n_E)`` along its energy axis."""
     if n_energy is None or int(n_energy) == energy.size:
         return values, energy
@@ -165,11 +164,11 @@ def _resample_energy(values: np.ndarray, energy: np.ndarray, n_energy):
     return out, target
 
 
-def convert_cut(slit_deg, energy_eV, value, *, deflector_deg: float,
-                gamma_deflector_deg: float = 0.0, gamma_slit_deg: float = 0.0,
-                azimuth_deg: float = 0.0, energy_offset_eV: float = 0.0,
-                n_k: int = 200, n_energy: int = None, radial: bool = False,
-                trim: bool = False):
+def convert_cut(slit_deg, energy_eV, value, *, deflector_deg,
+                gamma_deflector_deg=0.0, gamma_slit_deg=0.0,
+                azimuth_deg=0.0, energy_offset_eV=0.0,
+                n_k=200, n_energy=None, radial=False,
+                trim=False):
     """Convert one Cut from (angle, E) to (k, E).
 
     ``value`` is ``(n_slit, n_energy)``, matching this program's Cut layout.

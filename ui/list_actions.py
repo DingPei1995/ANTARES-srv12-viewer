@@ -8,7 +8,6 @@ enough to grey it out.
 
 Qt-free on purpose, so the rules can be tested on their own.
 """
-from __future__ import annotations
 
 #: The label a row is listed with -> the dataset kind it stands for.
 LABEL_KINDS = {
@@ -46,13 +45,13 @@ RULES = {
 }
 
 
-def kind_of(label) -> str:
+def kind_of(label):
     """The dataset kind for a row's listed kind label ("Map" -> "map");
     "unknown" for anything this program cannot open."""
     return LABEL_KINDS.get(str(label or "").strip().lower(), "unknown")
 
 
-def availability(action: str, rows):
+def availability(action, rows):
     """``(enabled, reason)`` for one menu entry.
 
     ``rows`` is ``[(name, kind label), ...]`` for the selected rows, in list

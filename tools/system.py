@@ -14,17 +14,18 @@ originals (e.g. to get the toast-style Win10Notif popups and the
 shared-memory "Sync with running scan" feature) -- the function signatures
 here were kept close to the originals for that reason.
 """
-from __future__ import annotations
 
 import json
 import os
 import numpy as np
 
+from compat.numpy_compat import nan_to_num
+
 
 # --------------------------------------------------------------------------
 # Thumbnail / image export
 # --------------------------------------------------------------------------
-def normalize_to_uint8(array: np.ndarray) -> np.ndarray:
+def normalize_to_uint8(array):
     arr = np.asarray(array, dtype=float)
     finite = arr[np.isfinite(arr)]
     if finite.size == 0:
@@ -35,11 +36,11 @@ def normalize_to_uint8(array: np.ndarray) -> np.ndarray:
     if hi <= lo:
         return np.zeros(arr.shape, dtype=np.uint8)
     scaled = np.clip((arr - lo) / (hi - lo), 0, 1)
-    scaled = np.nan_to_num(scaled, nan=0.0)
+    scaled = nan_to_num(scaled, nan=0.0)
     return (scaled * 255).astype(np.uint8)
 
 
-def save_img(path, array: np.ndarray, lut=None):
+def save_img(path, array, lut=None):
     """Save (or just render, if ``path`` is None) ``array`` as a PNG.
 
     ``lut``: optional (N,3) uint8 RGB lookup table -- pass the one the GUI is
@@ -81,7 +82,7 @@ def save_img(path, array: np.ndarray, lut=None):
 # --------------------------------------------------------------------------
 # Tiny config persistence (last-used folder, window prefs, ...)
 # --------------------------------------------------------------------------
-def load_config(path: str, defaults: dict) -> dict:
+def load_config(path, defaults):
     if os.path.isfile(path):
         try:
             with open(path, "r", encoding="utf-8") as fh:
@@ -94,7 +95,7 @@ def load_config(path: str, defaults: dict) -> dict:
     return dict(defaults)
 
 
-def dump_config(path: str, values: dict) -> None:
+def dump_config(path, values):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(values, fh, indent=2)

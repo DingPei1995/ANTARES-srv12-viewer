@@ -47,9 +47,8 @@ physicist's convention used throughout this program, matching
 ``tools.kspace``'s Å⁻¹ axes -- not the crystallographer's 1/angstrom without
 the 2*pi).
 """
-from __future__ import annotations
 
-from dataclasses import dataclass
+from compat.dataclasses import dataclass
 
 import numpy as np
 
@@ -67,21 +66,21 @@ class LatticeParams:
     lattice: either a space-group number, or an explicit centering letter
     for someone who knows the lattice type but not (or does not want to
     type) the exact space group."""
-    a: float
-    b: float
-    c: float
-    alpha: float = 90.0
-    beta: float = 90.0
-    gamma: float = 90.0
+    a: 'float'
+    b: 'float'
+    c: 'float'
+    alpha: 'float' = 90.0
+    beta: 'float' = 90.0
+    gamma: 'float' = 90.0
     space_group: "int | None" = None
     centering: "str | None" = None   # P/A/B/C/I/F/R, used only if space_group is None
 
-    def resolved_centering(self) -> str:
+    def resolved_centering(self):
         if self.space_group is not None:
             return spacegroup_info(self.space_group).centering
         return (self.centering or "P").upper()
 
-    def crystal_system(self) -> "str | None":
+    def crystal_system(self):
         """None when only a bare centering letter was given -- a centering
         letter alone does not say which crystal system it belongs to (e.g.
         'P' is every one of them), so there is nothing to validate the
@@ -91,7 +90,7 @@ class LatticeParams:
         return None
 
 
-def bravais_symbol(params: LatticeParams) -> str:
+def bravais_symbol(params):
     """e.g. 'cF', 'hR', 'mC' -- for display, and to key the centering
     transform table."""
     if params.space_group is not None:
@@ -107,7 +106,7 @@ def bravais_symbol(params: LatticeParams) -> str:
 # -- validating the six parameters against the crystal system --------------
 # What each crystal system requires (constraint checks only -- nothing here
 # alters the numbers, it just says whether they are self-consistent).
-def _requirements(system: str):
+def _requirements(system):
     """(equal_length_groups, required_angles) for a crystal system.
 
     ``equal_length_groups`` is a list of tuples of parameter names that must
@@ -134,7 +133,7 @@ def _requirements(system: str):
     raise ValueError(f"unknown crystal system {system!r}")
 
 
-def validate_lattice_parameters(params: LatticeParams, rel_tol: float = 1e-3):
+def validate_lattice_parameters(params, rel_tol=1e-3):
     """Warnings (not exceptions) about ``params`` being inconsistent with
     its crystal system -- e.g. a cubic space group with a != b.
 
@@ -173,7 +172,7 @@ def validate_lattice_parameters(params: LatticeParams, rel_tol: float = 1e-3):
 
 
 # -- conventional cell ------------------------------------------------------
-def conventional_vectors(params: LatticeParams) -> np.ndarray:
+def conventional_vectors(params):
     """The conventional-cell real-space basis vectors as rows of a (3, 3)
     array, for the general triclinic case (every other crystal system is a
     special case of these six parameters).
@@ -245,7 +244,7 @@ LATTICE_POINTS_PER_CONVENTIONAL_CELL = {"P": 1, "A": 2, "B": 2, "C": 2,
                                         "I": 2, "F": 4, "R": 3}
 
 
-def primitive_vectors(params: LatticeParams) -> np.ndarray:
+def primitive_vectors(params):
     """The primitive-cell real-space basis, as rows of a (3, 3) array:
     :func:`conventional_vectors` with the centering transform for this
     lattice's Bravais type applied.
@@ -261,7 +260,7 @@ def primitive_vectors(params: LatticeParams) -> np.ndarray:
     return transform @ conventional
 
 
-def reciprocal_vectors(vectors: np.ndarray) -> np.ndarray:
+def reciprocal_vectors(vectors):
     """Reciprocal-lattice vectors (rows) in the physicist's convention
     (2*pi included), matching the Å⁻¹ axes the rest of this program uses.
 
@@ -292,12 +291,12 @@ class CellConstraints:
     not the user's to choose, rather than accepting a cell that contradicts
     the space group and warning about it afterwards.
     """
-    mirrors: dict
-    fixed_angles: dict
-    note: str = ""
+    mirrors: 'dict'
+    fixed_angles: 'dict'
+    note: 'str' = ""
 
 
-def free_parameters(space_group: int) -> CellConstraints:
+def free_parameters(space_group):
     """The cell-parameter constraints implied by a space-group number.
 
     The conventional (not primitive) cell is what is constrained, which is
@@ -335,7 +334,7 @@ def free_parameters(space_group: int) -> CellConstraints:
 
 
 # -- point group, in Cartesian reciprocal space -----------------------------
-def point_group_operations(params: LatticeParams, laue: bool = True) -> np.ndarray:
+def point_group_operations(params, laue=True):
     """The space group's point-group rotations as Cartesian 3x3 matrices,
     ``(N, 3, 3)`` -- what acts on a k-vector.
 

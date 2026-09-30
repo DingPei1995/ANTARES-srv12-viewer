@@ -35,9 +35,8 @@ one is right is settled by knowing the material.
 
 Nothing here imports Qt.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass
+from compat.dataclasses import dataclass
 
 import numpy as np
 
@@ -52,19 +51,19 @@ class Candidate:
 
     #: Miller indices against the **conventional** cell, which is how planes
     #: are named. Integer for any real lattice vector.
-    hkl: tuple
+    hkl: 'tuple'
     #: The period along that normal, A^-1 -- the length of the shortest
     #: reciprocal lattice vector in that direction.
-    length: float
+    length: 'float'
     #: The real-space repeat along the normal, A. ``2*pi/length``.
-    spacing: float
+    spacing: 'float'
     #: How many zones the picked points were apart for this to match.
-    orders: int
+    orders: 'int'
     #: Signed relative error, ``(measured/orders - length) / length``.
-    error: float
+    error: 'float'
 
     @property
-    def family(self) -> tuple:
+    def family(self):
         """``(hkl)`` reduced to coprime integers -- the plane's usual name.
 
         Different from :attr:`hkl` exactly when the first allowed reflection
@@ -80,7 +79,7 @@ class Candidate:
             return tuple(values)
         return tuple(v // divisor for v in values)
 
-    def describe(self) -> str:
+    def describe(self):
         name = "(" + " ".join(str(int(v)) for v in self.hkl) + ")"
         text = (f"{name}  period {self.length:.4f} A^-1  "
                 f"d = {self.spacing:.4f} A  off by {100 * self.error:+.1f}%")
@@ -92,8 +91,8 @@ class Candidate:
         return text
 
 
-def reciprocal_lengths(params: LatticeParams, max_index: int = 4,
-                       direction_tol: float = 1e-6):
+def reciprocal_lengths(params, max_index=4,
+                       direction_tol=1e-6):
     """Every distinct normal direction of the lattice, with its period.
 
     Returns ``[(hkl_conventional, length, unit_direction), ...]`` sorted by
@@ -134,12 +133,12 @@ def reciprocal_lengths(params: LatticeParams, max_index: int = 4,
     return found
 
 
-def _conventional_rows(params: LatticeParams) -> np.ndarray:
+def _conventional_rows(params):
     from tools.lattice import conventional_vectors
     return conventional_vectors(params)
 
 
-def _round_indices(values, tol: float = 1e-4) -> tuple:
+def _round_indices(values, tol=1e-4):
     """Miller indices as plain integers.
 
     A reciprocal lattice vector of a centred lattice has integer indices
@@ -158,7 +157,7 @@ def _round_indices(values, tol: float = 1e-4) -> tuple:
     return tuple(int(v) + 0 for v in rounded)
 
 
-def _is_negative(hkl) -> bool:
+def _is_negative(hkl):
     """True when the first non-zero index is negative."""
     for value in hkl:
         if value:
@@ -166,9 +165,9 @@ def _is_negative(hkl) -> bool:
     return False
 
 
-def candidates(distance: float, params: LatticeParams, *,
-               tolerance: float = 0.15, max_index: int = 4,
-               max_orders: int = 3, limit: int = 12):
+def candidates(distance, params, *,
+               tolerance=0.15, max_index=4,
+               max_orders=3, limit=12):
     """Which planes could give a k_z period of ``distance`` A^-1.
 
     ``tolerance`` is the fractional window, 0.15 by default. ``max_orders``

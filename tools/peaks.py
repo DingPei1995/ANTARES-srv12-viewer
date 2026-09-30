@@ -45,11 +45,13 @@ out shifted and clipped if the cut-off is ignored. Dividing it out of the
 data first is worse still: it divides the noise up as well, and above E_F
 it divides by a number known only to within that noise.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
+
+#: numpy 2 renamed trapz; either spelling, whichever this numpy has.
+_trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 from scipy import optimize
 from scipy.interpolate import PchipInterpolator
 from scipy.special import wofz
@@ -66,8 +68,8 @@ BACKGROUNDS = ("none", "constant", "linear", "shirley")
 # ==========================================================================
 # Line shapes
 # ==========================================================================
-def peak_profile(shape: str, x, centre: float, width: float,
-                 resolution: float = 0.0):
+def peak_profile(shape, x, centre, width,
+                 resolution=0.0):
     """One unit-height peak. ``width`` is the FWHM throughout.
 
     FWHM, never the half width: ``fit_MDC_demo`` uses the half width in its
@@ -114,10 +116,10 @@ shirley_background = _shirley_background
 @dataclass
 class Seed:
     """One hand-placed point: "this band is here, this wide, at this line"."""
-    position: float           # where on the axis the lines are spaced along
-    centre: float             # where the peak sits along the line
-    width: float              # FWHM
-    height: float = 0.0
+    position: 'float'           # where on the axis the lines are spaced along
+    centre: 'float'             # where the peak sits along the line
+    width: 'float'              # FWHM
+    height: 'float' = 0.0
 
 
 @dataclass
@@ -129,12 +131,12 @@ class Band:
     width -- the constrained-shape idea from ``peakfit``'s equal-width
     variants, but per band rather than all-or-nothing.
     """
-    name: str
-    seeds: list = field(default_factory=list)
-    shape: str = "lorentzian"
-    share_width: str = ""
-    fix_width: bool = False
-    colour: int = 0
+    name: 'str'
+    seeds: 'list' = field(default_factory=list)
+    shape: 'str' = "lorentzian"
+    share_width: 'str' = ""
+    fix_width: 'bool' = False
+    colour: 'int' = 0
 
     def sorted_seeds(self):
         return sorted(self.seeds, key=lambda s: s.position)
@@ -146,7 +148,7 @@ class Band:
         positions = [s.position for s in self.seeds]
         return (min(positions), max(positions))
 
-    def covers(self, position: float, tol: float = 0.0) -> bool:
+    def covers(self, position, tol=0.0):
         span = self.span()
         if span is None:
             return False
@@ -183,16 +185,16 @@ class Band:
 @dataclass
 class FitSettings:
     """Everything about the fit that is not a band."""
-    background: str = "linear"
-    resolution: float = 0.0             # Gaussian FWHM, instrument
-    weighting: str = "poisson"
+    background: 'str' = "linear"
+    resolution: 'float' = 0.0             # Gaussian FWHM, instrument
+    weighting: 'str' = "poisson"
     #: EDC only: multiply the model by the Fermi-Dirac occupation.
-    fermi: bool = False
-    ef: float = 0.0
-    temperature: float = 30.0
-    max_iterations: int = 400
+    fermi: 'bool' = False
+    ef: 'float' = 0.0
+    temperature: 'float' = 30.0
+    max_iterations: 'int' = 400
 
-    def background_columns(self) -> int:
+    def background_columns(self):
         return {"none": 0, "shirley": 0, "constant": 1, "linear": 2}[
             self.background]
 
@@ -203,40 +205,40 @@ class FitSettings:
 @dataclass
 class LineFit:
     """One fitted MDC or EDC."""
-    x: np.ndarray
-    y: np.ndarray
-    model: np.ndarray
-    background: np.ndarray
-    names: list
-    centres: np.ndarray
-    centre_errors: np.ndarray
-    widths: np.ndarray
-    width_errors: np.ndarray
-    heights: np.ndarray
-    height_errors: np.ndarray
-    areas: np.ndarray
-    position: float = float("nan")
-    chi2: float = float("nan")
-    r_squared: float = float("nan")
-    shapes: list = field(default_factory=list)
-    resolution: float = 0.0
-    success: bool = True
-    message: str = ""
+    x: 'np.ndarray'
+    y: 'np.ndarray'
+    model: 'np.ndarray'
+    background: 'np.ndarray'
+    names: 'list'
+    centres: 'np.ndarray'
+    centre_errors: 'np.ndarray'
+    widths: 'np.ndarray'
+    width_errors: 'np.ndarray'
+    heights: 'np.ndarray'
+    height_errors: 'np.ndarray'
+    areas: 'np.ndarray'
+    position: 'float' = float("nan")
+    chi2: 'float' = float("nan")
+    r_squared: 'float' = float("nan")
+    shapes: 'list' = field(default_factory=list)
+    resolution: 'float' = 0.0
+    success: 'bool' = True
+    message: 'str' = ""
 
     @property
-    def residual(self) -> np.ndarray:
+    def residual(self):
         return self.y - self.model
 
-    def component(self, index: int) -> np.ndarray:
+    def component(self, index):
         """One band's own peak, on top of the background."""
         return self.background + self.heights[index] * self._shape(index)
 
-    def _shape(self, index: int) -> np.ndarray:
+    def _shape(self, index):
         return peak_profile(self.shapes[index], self.x, self.centres[index],
                             self.widths[index], self.resolution)
 
 
-def _weights(y, weighting: str):
+def _weights(y, weighting):
     if weighting == "poisson":
         # sqrt(N) is the counting error; the floor of 1 keeps an empty
         # channel from being given infinite weight.
@@ -246,7 +248,7 @@ def _weights(y, weighting: str):
     raise ValueError(f"weighting {weighting!r} is not poisson or none")
 
 
-def _occupation(x, settings: FitSettings):
+def _occupation(x, settings):
     """``(offsets, weights, f)`` for the resolution/Fermi convolution.
 
     Returned as a grid so the same machinery serves every column: a column
@@ -269,7 +271,7 @@ def _occupation(x, settings: FitSettings):
                                             settings.temperature)
 
 
-def _design(x, centres, widths, shapes, settings: FitSettings, fermi_cache):
+def _design(x, centres, widths, shapes, settings, fermi_cache):
     """The linear model's columns: one per band, then the background."""
     x = np.asarray(x, dtype=float)
     columns = []
@@ -314,8 +316,8 @@ def _solve_linear(design, y, sigma, n_peaks):
         return np.linalg.lstsq(scaled, target, rcond=None)[0]
 
 
-def fit_line(x, y, bands, settings: FitSettings, *, guesses=None,
-             position: float = float("nan"), sigma=None) -> LineFit:
+def fit_line(x, y, bands, settings, *, guesses=None,
+             position=float("nan"), sigma=None):
     """Fit one MDC or EDC with the given bands.
 
     ``guesses`` is an optional ``{name: (centre, width, height)}`` from the
@@ -475,7 +477,7 @@ def fit_line(x, y, bands, settings: FitSettings, *, guesses=None,
                    bool(result.success), str(result.message))
 
 
-def _area_factor(shape: str, width: float, resolution: float) -> float:
+def _area_factor(shape, width, resolution):
     """Integral of a unit-height peak of this shape and width."""
     if shape == "gaussian":
         full = float(np.hypot(width, resolution))
@@ -486,11 +488,11 @@ def _area_factor(shape: str, width: float, resolution: float) -> float:
     # closed form that is only valid for the normalised shape.
     grid = np.linspace(-20.0 * (width + resolution), 20.0 * (width + resolution),
                        4001)
-    return float(np.trapezoid(peak_profile(shape, grid, 0.0, width, resolution),
+    return float(_trapezoid(peak_profile(shape, grid, 0.0, width, resolution),
                               grid))
 
 
-def _numeric_jacobian(function, params, relative: float = 1e-6):
+def _numeric_jacobian(function, params, relative=1e-6):
     """Central-difference Jacobian, stepped relative to each parameter."""
     params = np.asarray(params, dtype=float)
     base = function(params)
@@ -510,22 +512,22 @@ def _numeric_jacobian(function, params, relative: float = 1e-6):
 @dataclass
 class BandSeries:
     """Every line's fit, and the dispersions that come out of them."""
-    positions: np.ndarray
-    names: list
-    centres: np.ndarray                  # (n_lines, n_bands), NaN where absent
-    centre_errors: np.ndarray
-    widths: np.ndarray
-    width_errors: np.ndarray
-    heights: np.ndarray
-    areas: np.ndarray
-    chi2: np.ndarray
-    fits: list = field(default_factory=list)
-    direction: str = "mdc"
-    x_label: str = ""
-    y_label: str = ""
-    settings: FitSettings = None
+    positions: 'np.ndarray'
+    names: 'list'
+    centres: 'np.ndarray'                  # (n_lines, n_bands), NaN where absent
+    centre_errors: 'np.ndarray'
+    widths: 'np.ndarray'
+    width_errors: 'np.ndarray'
+    heights: 'np.ndarray'
+    areas: 'np.ndarray'
+    chi2: 'np.ndarray'
+    fits: 'list' = field(default_factory=list)
+    direction: 'str' = "mdc"
+    x_label: 'str' = ""
+    y_label: 'str' = ""
+    settings: 'FitSettings' = None
 
-    def band(self, index: int = 0):
+    def band(self, index=0):
         """``(k, E, k_error)`` for one band, in plotting order.
 
         For an MDC series the fitted quantity is the momentum and the
@@ -541,14 +543,14 @@ class BandSeries:
         return (self.positions[good], self.centres[good, index],
                 self.centre_errors[good, index])
 
-    def error_axis(self) -> str:
+    def error_axis(self):
         """Which of the two axes the fitted error belongs to."""
         return "x" if self.direction == "mdc" else "y"
 
 
-def fit_series(values, axes, bands, settings: FitSettings, *,
-               direction: str = "mdc", step: int = 1, combine: int = 1,
-               bounds=None, refine: bool = True, progress=None) -> BandSeries:
+def fit_series(values, axes, bands, settings, *,
+               direction="mdc", step=1, combine=1,
+               bounds=None, refine=True, progress=None):
     """Fit every line of a cut, seeding each from the bands' own seeds.
 
     ``refine`` runs a second pass using the first pass's answer as the
@@ -648,7 +650,7 @@ def fit_series(values, axes, bands, settings: FitSettings, *,
 # ==========================================================================
 # Seeding helpers
 # ==========================================================================
-def suggest_seed(x, y, centre: float, *, window: float = None):
+def suggest_seed(x, y, centre, *, window=None):
     """Height and width for a seed dropped at ``centre``.
 
     The user points at the band; the width and height are read off the data

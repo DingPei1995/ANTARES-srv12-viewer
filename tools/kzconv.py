@@ -58,7 +58,6 @@ deviation", and then leaves it out of ``k_z`` -- at a manipulator angle of
 
 Nothing here imports Qt.
 """
-from __future__ import annotations
 
 import warnings
 
@@ -77,8 +76,8 @@ A_CONST = 2 * 9.1093837015e-31 * 1.602176634e-19 / (1.054571817e-34 ** 2) * 1e-2
 # --------------------------------------------------------------------------
 # The map, both ways
 # --------------------------------------------------------------------------
-def forward(kinetic_energy, alpha, *, inner_potential: float,
-            effective_mass: float = 1.0, theta_position: float = 0.0):
+def forward(kinetic_energy, alpha, *, inner_potential,
+            effective_mass=1.0, theta_position=0.0):
     """``(E_kin, alpha)`` -> ``(k_par, k_z)``, both in A^-1.
 
     ``alpha`` and ``theta_position`` are in radians, and ``alpha`` is the
@@ -100,8 +99,8 @@ def forward(kinetic_energy, alpha, *, inner_potential: float,
     return k_par, k_z
 
 
-def inverse(k_z, k_par, *, inner_potential: float,
-            effective_mass: float = 1.0, theta_position: float = 0.0):
+def inverse(k_z, k_par, *, inner_potential,
+            effective_mass=1.0, theta_position=0.0):
     """``(k_z, k_par)`` -> ``(E_kin, alpha)``. The exact inverse of
     :func:`forward`, in closed form.
 
@@ -126,9 +125,9 @@ def inverse(k_z, k_par, *, inner_potential: float,
     return kinetic_energy, alpha
 
 
-def kz_bounds(photon_energy, angle, energy, *, inner_potential: float,
-              work_function: float, effective_mass: float = 1.0,
-              angle_offset: float = 0.0, theta_position: float = 0.0):
+def kz_bounds(photon_energy, angle, energy, *, inner_potential,
+              work_function, effective_mass=1.0,
+              angle_offset=0.0, theta_position=0.0):
     """The rectangle in ``(k_z, k_par)`` that this measurement covers.
 
     Evaluated at the two ends of the energy window only: ``k`` grows
@@ -189,10 +188,10 @@ def _sample_plane(cube_slice, photon_energy, alpha_axis, hv_wanted,
     return out
 
 
-def to_kz_cube(photon_energy, angle, energy, cube, *, inner_potential: float,
-               work_function: float, effective_mass: float = 1.0,
-               angle_offset: float = 0.0, theta_position: float = 0.0,
-               n_kz: int = 256, n_kpar: int = 256, kz_range=None,
+def to_kz_cube(photon_energy, angle, energy, cube, *, inner_potential,
+               work_function, effective_mass=1.0,
+               angle_offset=0.0, theta_position=0.0,
+               n_kz=256, n_kpar=256, kz_range=None,
                kpar_range=None, progress=None):
     """Convert a whole photon-energy scan into ``(k_z, k_par, E)``.
 
@@ -258,10 +257,10 @@ def to_kz_cube(photon_energy, angle, energy, cube, *, inner_potential: float,
 # --------------------------------------------------------------------------
 # The inner potential
 # --------------------------------------------------------------------------
-def photon_arc(photon_energy: float, angle, *, inner_potential: float,
-               work_function: float, effective_mass: float = 1.0,
-               angle_offset: float = 0.0, theta_position: float = 0.0,
-               binding_energy: float = 0.0):
+def photon_arc(photon_energy, angle, *, inner_potential,
+               work_function, effective_mass=1.0,
+               angle_offset=0.0, theta_position=0.0,
+               binding_energy=0.0):
     """The locus one photon energy traces in ``(k_z, k_par)`` as the
     detector angle sweeps.
 
@@ -292,7 +291,7 @@ class PeriodScan:
         self.best = best
 
     @property
-    def sensitivity(self) -> float:
+    def sensitivity(self):
         """d(period)/d(V0), A^-1 per eV. How sharply the scan distinguishes
         one inner potential from another -- small means it barely does."""
         good = np.isfinite(self.periods)
@@ -301,7 +300,7 @@ class PeriodScan:
         return float(np.polyfit(self.inner_potentials[good],
                                 self.periods[good], 1)[0])
 
-    def uncertainty(self, period_error: float = 0.02) -> float:
+    def uncertainty(self, period_error=0.02):
         """How well V0 is pinned, in eV, if the period can be measured to
         ``period_error`` (a fraction).
 
@@ -330,12 +329,12 @@ def _dominant_period(axis, profile, target, span=(0.5, 2.0), samples=600):
     return float(trial[int(np.argmax(amplitude))])
 
 
-def scan_inner_potential(photon_energy, angle, energy, cube, *, spacing: float,
-                         work_function: float, effective_mass: float = 1.0,
-                         angle_offset: float = 0.0, theta_position: float = 0.0,
-                         binding_energy: float = 0.0, kpar_halfwidth: float = 0.3,
-                         inner_potentials=None, n_kz: int = 400,
-                         progress=None) -> PeriodScan:
+def scan_inner_potential(photon_energy, angle, energy, cube, *, spacing,
+                         work_function, effective_mass=1.0,
+                         angle_offset=0.0, theta_position=0.0,
+                         binding_energy=0.0, kpar_halfwidth=0.3,
+                         inner_potentials=None, n_kz=400,
+                         progress=None):
     """Find the inner potential whose conversion makes the k_z pattern
     repeat with the lattice's own period.
 
@@ -400,8 +399,8 @@ def scan_inner_potential(photon_energy, angle, energy, cube, *, spacing: float,
 # --------------------------------------------------------------------------
 # Is the Fermi surface flat enough to convert?
 # --------------------------------------------------------------------------
-def edge_flatness(cube, angle, energy, *, binding_energy: float = 0.0,
-                  window: float = 0.35):
+def edge_flatness(cube, angle, energy, *, binding_energy=0.0,
+                  window=0.35):
     """How far the Fermi edge wanders across the analyser angle, in eV.
 
     A curved edge is an artefact of the analyser, not of the sample, and the

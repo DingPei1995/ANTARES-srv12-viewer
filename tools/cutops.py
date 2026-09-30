@@ -44,11 +44,10 @@ What it does, and says it did:
 
 Nothing here imports Qt.
 """
-from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 
@@ -109,7 +108,7 @@ PRESETS = {
 # --------------------------------------------------------------------------
 # Units and grids
 # --------------------------------------------------------------------------
-def axis_unit(label: str) -> str:
+def axis_unit(label):
     """The unit an axis label ends with: ``"Angle (deg)"`` -> ``"deg"``.
 
     Normalised so that the spellings in use here compare equal -- ``A^-1``,
@@ -139,7 +138,7 @@ def _ascending(axis, values, dim):
     return axis, values
 
 
-def _same_grid(a_axes, b_axes, tolerance: float = 0.05) -> bool:
+def _same_grid(a_axes, b_axes, tolerance=0.05):
     """Same size, and no sample more than ``tolerance`` of a step apart."""
     for a, b in zip(a_axes, b_axes):
         a = np.asarray(a, dtype=float)
@@ -165,7 +164,7 @@ def _resample(values, from_axes, to_axes):
     return interpolate(np.column_stack([gx.ravel(), gy.ravel()])).reshape(gx.shape)
 
 
-def looks_like_counts(values) -> bool:
+def looks_like_counts(values):
     """Whether these are raw detector counts, for which Poisson statistics
     hold.
 
@@ -190,30 +189,30 @@ def looks_like_counts(values) -> bool:
 class CombineResult:
     """The combined cut, on A's grid, and everything worth reporting."""
 
-    values: np.ndarray
+    values: 'np.ndarray'
     #: Poisson standard deviation per pixel, or None when the inputs are not
     #: raw counts (or the operation is a ratio, where the reference's own
     #: noise is usually negligible and its statistics unknown).
     sigma: "np.ndarray | None"
     #: The factor B was multiplied by before combining.
-    scale: float
+    scale: 'float'
     #: Whether B had to be interpolated onto A's grid.
-    resampled: bool
+    resampled: 'bool'
     #: Fraction of A's grid that B covers.
-    overlap: float
+    overlap: 'float'
     #: B as it entered the arithmetic: on A's grid and times ``scale``.
     #: Kept so a display of the inputs shows exactly what was combined.
-    b_used: np.ndarray
+    b_used: 'np.ndarray'
     #: Fraction of the covered grid hidden by the low-intensity mask or the
     #: reference floor.
-    masked: float
+    masked: 'float'
     #: Median of ``sigma`` over what is shown, or None.
     median_sigma: "float | None" = None
     #: Fraction of the shown pixels where |result| > 2 sigma, or None.
     significant: "float | None" = None
-    notes: list = field(default_factory=list)
+    notes: 'list' = field(default_factory=list)
 
-    def summary(self) -> str:
+    def summary(self):
         lines = []
         if self.scale != 1.0:
             lines.append(f"B scaled by {self.scale:.5g} to match A")
@@ -240,7 +239,7 @@ def _box_mask(axes, region):
             & (gy >= min(y0, y1)) & (gy <= max(y0, y1)))
 
 
-def _reference(b, shape: str):
+def _reference(b, shape):
     """The divisor for a ratio, normalised to a mean of one.
 
     Normalised so that dividing by it removes a *sensitivity* and leaves A's
@@ -262,11 +261,11 @@ def _reference(b, shape: str):
     return profile / mean
 
 
-def combine(a_values, a_axes, b_values, b_axes, *, operation: str,
-            normalise: str = "none", region=None,
-            reference_shape: str = "full", reference_floor: float = 0.05,
-            intensity_floor: float = 0.0, a_labels=("", ""),
-            b_labels=("", "")) -> CombineResult:
+def combine(a_values, a_axes, b_values, b_axes, *, operation,
+            normalise="none", region=None,
+            reference_shape="full", reference_floor=0.05,
+            intensity_floor=0.0, a_labels=("", ""),
+            b_labels=("", "")):
     """Combine two cuts on A's grid.
 
     ``a_values`` and ``b_values`` are ``(x, y)`` -- angle or momentum, then
@@ -427,7 +426,7 @@ COMPARED = [
 ]
 
 
-def _lookup(info: dict, keys):
+def _lookup(info, keys):
     for key in keys:
         if key.startswith("~"):
             pattern = re.compile(key[1:], re.IGNORECASE)
@@ -439,7 +438,7 @@ def _lookup(info: dict, keys):
     return None
 
 
-def metadata_differences(info_a: dict, info_b: dict):
+def metadata_differences(info_a, info_b):
     """What the two measurements recorded, side by side.
 
     Returns ``[(quantity, a, b, differs), ...]`` for every quantity at least
@@ -466,7 +465,7 @@ def metadata_differences(info_a: dict, info_b: dict):
     return rows
 
 
-def _kind_of_polarisation(value) -> "str | None":
+def _kind_of_polarisation(value):
     if value is None:
         return None
     text = str(value).strip().upper()
@@ -478,7 +477,7 @@ def _kind_of_polarisation(value) -> "str | None":
     return None
 
 
-def polarisation_warnings(info_a: dict, info_b: dict, preset: str):
+def polarisation_warnings(info_a, info_b, preset):
     """What the recorded polarisations say about the chosen measurement.
 
     Only checks what can be checked: a preset with no expectation, or a

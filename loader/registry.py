@@ -41,10 +41,9 @@ Two things a reader cannot know but the user does, both carried in
   load time keeps the wrong unit from propagating into every later step --
   and stops a k-conversion being offered for an axis that is not an angle.
 """
-from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 
@@ -87,11 +86,11 @@ class LoadOptions:
     other value is the user overriding it, which stays possible because a
     reader's guess is still a guess.
     """
-    loader: str = None                 # None -> detect
-    permutation: tuple = None          # e.g. (1, 0, 2)
-    axis0_role: str = None             # a key of AXIS_ROLES; None -> as read
-    axis0_label: str = ""              # overrides the role's own label
-    extra: dict = field(default_factory=dict)
+    loader: 'str' = None                 # None -> detect
+    permutation: 'tuple' = None          # e.g. (1, 0, 2)
+    axis0_role: 'str' = None             # a key of AXIS_ROLES; None -> as read
+    axis0_label: 'str' = ""              # overrides the role's own label
+    extra: 'dict' = field(default_factory=dict)
 
 
 class Loader:
@@ -123,32 +122,32 @@ class Loader:
     patterns = ("*.nxs",)
     priority = 0
 
-    def can_open(self, path: str) -> bool:
+    def can_open(self, path):
         raise NotImplementedError
 
-    def list_entries(self, path: str) -> list:
+    def list_entries(self, path):
         raise NotImplementedError
 
-    def load(self, path: str, entry: str = None, progress=None):
+    def load(self, path, entry=None, progress=None):
         raise NotImplementedError
 
 
 _REGISTRY: "dict[str, Loader]" = {}
 
 
-def register(loader: Loader) -> Loader:
+def register(loader):
     """Add a loader. Importing a ``nxs_loader_*`` module is what calls this,
     so adding a beamline is a new file and an import, not an edit here."""
     _REGISTRY[loader.name] = loader
     return loader
 
 
-def loaders() -> list:
+def loaders():
     """Every registered loader, best-detection-chance first."""
     return sorted(_REGISTRY.values(), key=lambda l: -l.priority)
 
 
-def get_loader(name: str) -> Loader:
+def get_loader(name):
     try:
         return _REGISTRY[name]
     except KeyError:
@@ -157,7 +156,7 @@ def get_loader(name: str) -> Loader:
             f"{sorted(_REGISTRY)}") from None
 
 
-def detect(path: str) -> "Loader | None":
+def detect(path):
     """The first loader that recognises ``path``, or None.
 
     Never raises: a loader that throws while sniffing an unfamiliar file is
@@ -173,7 +172,7 @@ def detect(path: str) -> "Loader | None":
     return None
 
 
-def list_entries(path: str, options: LoadOptions = None) -> list:
+def list_entries(path, options=None):
     """The datasets in ``path``, with the chosen (or detected) loader."""
     loader = _resolve(path, options)
     if loader is None:
@@ -184,13 +183,13 @@ def list_entries(path: str, options: LoadOptions = None) -> list:
         return []
 
 
-def _resolve(path: str, options: LoadOptions = None) -> "Loader | None":
+def _resolve(path, options=None):
     if options is not None and options.loader:
         return get_loader(options.loader)
     return detect(path)
 
 
-def load(path: str, entry: str = None, options: LoadOptions = None,
+def load(path, entry=None, options=None,
          progress=None):
     """Read one dataset, apply the load-time axis options, and return the
     :class:`loader.nxs_file.NxsScan`.
@@ -212,7 +211,7 @@ def load(path: str, entry: str = None, options: LoadOptions = None,
     return apply_options(scan, options)
 
 
-def _accepts_progress(method) -> bool:
+def _accepts_progress(method):
     import inspect
     try:
         parameters = inspect.signature(method).parameters
@@ -223,14 +222,14 @@ def _accepts_progress(method) -> bool:
 
 
 # -- load-time axis handling ---------------------------------------------------
-def _axis_slots(kind: str) -> tuple:
+def _axis_slots(kind):
     """Which of NxsScan's axis attributes hold this kind's dimensions, in
     the array's own order -- from the one table that says so."""
     from loader.nxs_file import axis_slots
     return axis_slots(kind, "array")
 
 
-def apply_options(scan, options: LoadOptions):
+def apply_options(scan, options):
     """Permute the axes and label the scanned axis, as the dialog asked.
 
     Done here rather than inside each loader so that every beamline gets the
@@ -315,7 +314,7 @@ def permute_axes(scan, permutation):
     return scan
 
 
-def role_is_angle(scan) -> bool:
+def role_is_angle(scan):
     """Whether this map's first axis is an emission angle -- i.e. whether a
     k conversion of it means anything. Anything that did not say is assumed
     to be an angle, which is what every file read before this existed was."""

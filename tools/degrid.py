@@ -66,9 +66,8 @@ column or per slice, or processed (see :func:`not_pixel_locked`). Converting
 to k, a Fermi-surface correction or the kz map alignment moves the grid off
 its pixels; after them there is no pattern left to find.
 """
-from __future__ import annotations
 
-from dataclasses import dataclass, field
+from compat.dataclasses import dataclass, field
 
 import numpy as np
 from scipy import fft as sfft
@@ -110,7 +109,7 @@ class GridNotFound(ValueError):
     """No periodic pattern stands out of the noise."""
 
 
-def not_pixel_locked(info: dict):
+def not_pixel_locked(info):
     """Why this dataset cannot be de-gridded, or None if it can."""
     info = info or {}
     for prefix, why in _MOVED.items():
@@ -132,8 +131,8 @@ def not_pixel_locked(info: dict):
 # --------------------------------------------------------------------------
 # Small pieces
 # --------------------------------------------------------------------------
-def illuminated_box(total, margin: int = 10, angle_fraction: float = 0.2,
-                    energy_fraction: float = 0.05):
+def illuminated_box(total, margin=10, angle_fraction=0.2,
+                    energy_fraction=0.05):
     """The part of the detector frame that saw electrons, less a margin.
 
     The dark borders are cut away because their hard edges ring across the
@@ -204,7 +203,7 @@ def find_regions(G, *, seed_threshold=DEFAULTS["seed_threshold"],
     return region, peaks
 
 
-def _fundamentals(peaks, n: int = 3, min_frequency: float = 0.05):
+def _fundamentals(peaks, n=3, min_frequency=0.05):
     """The strongest peaks, used for the phase (shift) fit. At least two
     non-parallel ones are needed for a 2-D shift; with one, the shift along
     it is still found. Only peaks of period 20 px or less: the grids seen
@@ -258,42 +257,42 @@ def grid_contrast(image, region, bright=None, smooth=DEFAULTS["smooth"]):
 @dataclass
 class GridModel:
     """A band-limited grid pattern on a box of the detector frame."""
-    frame_shape: tuple
-    box: tuple                       # (slice, slice) into the frame
-    spectrum: np.ndarray             # FFT of g = G − 1 on the box, band-limited
-    region: np.ndarray               # bool, k-space regions of the grid
-    fundamentals: np.ndarray         # (n, 2) cycles/px, for the shift fit
-    bright: np.ndarray               # bool, where the fit is weighted
-    peaks: list = field(default_factory=list)
+    frame_shape: 'tuple'
+    box: 'tuple'                       # (slice, slice) into the frame
+    spectrum: 'np.ndarray'             # FFT of g = G − 1 on the box, band-limited
+    region: 'np.ndarray'               # bool, k-space regions of the grid
+    fundamentals: 'np.ndarray'         # (n, 2) cycles/px, for the shift fit
+    bright: 'np.ndarray'               # bool, where the fit is weighted
+    peaks: 'list' = field(default_factory=list)
 
     @property
     def box_shape(self):
         return self.spectrum.shape
 
-    def pattern(self, d=(0.0, 0.0)) -> np.ndarray:
+    def pattern(self, d=(0.0, 0.0)):
         """g(r − d) on the box."""
         F0, F1 = _freqs(self.box_shape)
         phase = np.exp(-2j * np.pi * (F0 * d[0] + F1 * d[1]))
         return np.real(sfft.ifft2(self.spectrum * phase))
 
-    def full(self, d=(0.0, 0.0)) -> np.ndarray:
+    def full(self, d=(0.0, 0.0)):
         """``1 + g(r − d)`` over the whole frame, 1 outside the box."""
         out = np.ones(self.frame_shape)
         out[self.box] += self.pattern(d)
         return out
 
     @property
-    def rms(self) -> float:
+    def rms(self):
         g = self.pattern()
         return float(np.std(g[self.bright])) if self.bright.any() else float(np.std(g))
 
 
 @dataclass
 class SliceFit:
-    beta: float
-    shift: tuple
-    local: bool = False
-    empty: bool = False
+    beta: 'float'
+    shift: 'tuple'
+    local: 'bool' = False
+    empty: 'bool' = False
 
 
 def _phase_sums(r, w, qs):
@@ -308,7 +307,7 @@ def _phase_sums(r, w, qs):
     return np.array(out)
 
 
-def _tents(n: int, tiles: int):
+def _tents(n, tiles):
     """Partition-of-unity tent functions: ``(n, tiles)``."""
     centres = (np.arange(tiles) + 0.5) * n / tiles
     width = n / tiles
@@ -318,7 +317,7 @@ def _tents(n: int, tiles: int):
     return t / t.sum(1, keepdims=True)
 
 
-def fit_to(model: GridModel, image_box, smooth_box, *, tiles=DEFAULTS["tiles"],
+def fit_to(model, image_box, smooth_box, *, tiles=DEFAULTS["tiles"],
            g0=None):
     """Fit the grid to one image (the box part) and return
     ``(1 + fitted g, SliceFit)``. ``g0`` is ``model.pattern()``, passed in
@@ -387,16 +386,16 @@ def fit_to(model: GridModel, image_box, smooth_box, *, tiles=DEFAULTS["tiles"],
 # --------------------------------------------------------------------------
 @dataclass
 class DegridResult:
-    values: np.ndarray               # corrected, same shape as the input
-    model: GridModel
-    fits: list                       # SliceFit per slice (one for a cut)
-    method: str
-    contrast_before: float = float("nan")    # on the preview slice / the cut
-    contrast_after: float = float("nan")
-    preview_index: int = 0
-    notes: list = field(default_factory=list)
+    values: 'np.ndarray'               # corrected, same shape as the input
+    model: 'GridModel'
+    fits: 'list'                       # SliceFit per slice (one for a cut)
+    method: 'str'
+    contrast_before: 'float' = float("nan")    # on the preview slice / the cut
+    contrast_after: 'float' = float("nan")
+    preview_index: 'int' = 0
+    notes: 'list' = field(default_factory=list)
 
-    def summary(self) -> str:
+    def summary(self):
         m = self.model
         lines = [f"method: {self.method}",
                  f"grid: {len(m.peaks)} peaks, {100 * m.region.mean():.2f}% of "

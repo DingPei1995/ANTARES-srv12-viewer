@@ -33,7 +33,6 @@ axes       the vectors for that kind's dimensions, in the array's own
            verbatim, so this is where units live.
 ``info``   free-form metadata, shown in the information panel.
 """
-from __future__ import annotations
 
 
 from loader.nxs_file import list_datasets, load_soleil_nxs, _classify_entry
@@ -48,7 +47,7 @@ class SoleilAntaresLoader(Loader):
     patterns = ("*.nxs",)
     priority = 10
 
-    def can_open(self, path: str) -> bool:
+    def can_open(self, path):
         """Recognised by *structure*, not by filename.
 
         ``_classify_entry`` looks at what an entry actually contains -- which
@@ -68,10 +67,10 @@ class SoleilAntaresLoader(Loader):
             return False
         return False
 
-    def list_entries(self, path: str) -> list:
+    def list_entries(self, path):
         return list_datasets(path)
 
-    def load(self, path: str, entry: str = None):
+    def load(self, path, entry=None):
         return load_soleil_nxs(path, entry=entry)
 
 
