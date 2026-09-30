@@ -33,6 +33,10 @@ def _convolve1d(array, kernel, axis):
     return out
 
 
+#: Rows of a spatial scan are streamed in bands of at most about this many
+#: bytes (as float64), whatever the file's chunking says.
+STREAM_BAND_BYTES = 64 * 1024 * 1024
+
 #: A displayed image is resampled up to about this many samples along each
 #: axis before it is drawn, which is what turns a coarse scan from a wall of
 #: rectangles into a continuous picture.
@@ -291,16 +295,38 @@ class NxsData:
                 f"cube for the spatial overview.")
         return None
 
+    def _row_bands(self, rows):
+        """``rows`` (a range of spatial rows) cut into bands that follow the
+        file's chunking, so each compressed chunk is inflated once per
+        pass rather than once per row. Bands are kept to about
+        :data:`STREAM_BAND_BYTES` so memory stays bounded."""
+        cube = self.scan.value4d
+        block = int(getattr(cube, "row_block", 1) or 1)
+        per_row = max(1, int(np.prod(cube.shape[1:])) * 8)
+        block = max(1, min(block, int(STREAM_BAND_BYTES // per_row) or 1))
+        rows = list(rows)
+        if not rows:
+            return
+        band = [rows[0]]
+        for r in rows[1:]:
+            if r == band[-1] + 1 and len(band) < block and \
+                    (r // block) == (band[0] // block):
+                band.append(r)
+            else:
+                yield slice(band[0], band[-1] + 1)
+                band = [r]
+        yield slice(band[0], band[-1] + 1)
+
     def _overview_by_streaming(self, progress=None):
-        """Fallback: sum the cube one spatial row at a time, so peak memory
-        stays at one row rather than the whole gigabyte."""
+        """Fallback: sum the cube one band of spatial rows at a time, so
+        peak memory stays at one band rather than the whole gigabyte."""
         ny, nx = self.scan.value4d.shape[:2]
         overview = np.empty((ny, nx), dtype=np.float64)
-        for yi in range(ny):
-            row = np.asarray(self.scan.value4d[yi], dtype=np.float64)   # (x, k, E)
-            overview[yi] = row.sum(axis=(1, 2))
+        for band in self._row_bands(range(ny)):
+            rows = np.asarray(self.scan.value4d[band], dtype=np.float64)  # (y, x, k, E)
+            overview[band] = rows.sum(axis=(2, 3))
             if progress is not None:
-                progress(yi + 1, ny)
+                progress(band.stop, ny)
         return overview
 
     # -- spem_4d --------------------------------------------------------
@@ -329,11 +355,15 @@ class NxsData:
         spatial row at a time so a large selection never has to fit in
         memory all at once."""
         assert self.kind == "spem_4d"
-        rows = range(*yslice.indices(self.scan.value4d.shape[0]))
+        start, stop, step = yslice.indices(self.scan.value4d.shape[0])
         total = None
-        for yi in rows:
-            block = np.asarray(self.scan.value4d[yi, xslice], dtype=np.float64)
-            block = block.sum(axis=0)
+        if step != 1:
+            bands = [slice(yi, yi + 1) for yi in range(start, stop, step)]
+        else:
+            bands = self._row_bands(range(start, stop))
+        for band in bands:
+            block = np.asarray(self.scan.value4d[band, xslice], dtype=np.float64)
+            block = block.sum(axis=(0, 1))
             total = block if total is None else total + block
         return total
 
@@ -348,11 +378,12 @@ class NxsData:
         assert self.kind == "spem_4d"
         ny, nx = self.scan.value4d.shape[:2]
         out = np.empty((ny, nx), dtype=np.float64)
-        for yi in range(ny):
-            block = np.asarray(self.scan.value4d[yi, :, kslice, eslice], dtype=np.float64)
-            out[yi] = block.sum(axis=(1, 2))
+        for band in self._row_bands(range(ny)):
+            block = np.asarray(self.scan.value4d[band, :, kslice, eslice],
+                               dtype=np.float64)
+            out[band] = block.sum(axis=(2, 3))
             if progress is not None:
-                progress(yi + 1, ny)
+                progress(band.stop, ny)
         return out
 
     # -- spem_1d ----------------------------------------------------------

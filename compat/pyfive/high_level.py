@@ -4,12 +4,53 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 import os
 import posixpath
+import threading
+import weakref
 
 import numpy as np
 
 from .core import Reference
 from .dataobjects import DataObjects
 from .misc_low_level import SuperBlock
+from . import chunkcache
+
+#: Every Dataset that keeps a whole decompressed copy (see
+#: ``Dataset.__getitem__``), so that "free memory" can drop them all
+#: (patched in: ARPES viewer).
+_CACHING_DATASETS = weakref.WeakSet()
+
+
+def clear_dataset_caches():
+    """ Drop every whole-dataset copy kept by an open Dataset, and every
+    cached chunk. Returns the number of bytes released (patched in). """
+    freed = chunkcache.clear()
+    for dset in list(_CACHING_DATASETS):
+        cache = getattr(dset, '_cache', None)
+        if cache is not None:
+            freed += int(getattr(cache, 'nbytes', 0) or 0)
+            dset._cache = None
+    return freed
+
+
+def dataset_cache_bytes():
+    """ Bytes held in whole-dataset copies (patched in). """
+    total = 0
+    for dset in list(_CACHING_DATASETS):
+        cache = getattr(dset, '_cache', None)
+        if cache is not None:
+            total += int(getattr(cache, 'nbytes', 0) or 0)
+    return total
+
+
+class _NoLock(object):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+_NO_LOCK = _NoLock()
 
 
 class Group(Mapping):
@@ -36,7 +77,14 @@ class Group(Mapping):
         self.file = parent.file
         self.name = name
 
-        self._links = dataobjects.get_links()
+        # Patched (ARPES viewer): the links are parsed once per group object
+        # header and kept on it (see File._dataobjects_at).
+        links = getattr(dataobjects, '_links_cache', None)
+        if links is None:
+            with getattr(parent.file, '_lock', None) or _NO_LOCK:
+                links = dataobjects.get_links()
+            dataobjects._links_cache = links
+        self._links = links
         self._dataobjects = dataobjects
         self._attrs = None  # cached property
 
@@ -101,7 +149,7 @@ class Group(Mapping):
             except KeyError:
                 return None
 
-        dataobjs = DataObjects(self.file._fh, link_target)
+        dataobjs = self.file._dataobjects_at(link_target)
         if dataobjs.is_dataset:
             if additional_obj != '.':
                 raise KeyError('%s is a dataset, not a group' % (obj_name))
@@ -156,7 +204,8 @@ class Group(Mapping):
     def attrs(self):
         """ attrs attribute. """
         if self._attrs is None:
-            self._attrs = self._dataobjects.get_attributes()
+            with getattr(self.file, '_lock', None) or _NO_LOCK:
+                self._attrs = self._dataobjects.get_attributes()
         return self._attrs
 
 
@@ -201,9 +250,17 @@ class File(Group):
             self._fh = open(filename, 'rb')
             self._close = True
             self.filename = filename
+        # Patched (ARPES viewer): one lock per file, because the viewer
+        # reads the same file from the GUI thread and from worker threads
+        # and every read here is a seek followed by a read; and every object
+        # header parsed once and kept (by address), because walking to
+        # "/a/b/c/d" used to re-parse each of a, b, c from the file on every
+        # lookup -- hundreds of metadata lookups per scan.
+        self._lock = threading.RLock()
+        self._objects = {}
         self._superblock = SuperBlock(self._fh, 0)
         offset = self._superblock.offset_to_dataobjects
-        dataobjects = DataObjects(self._fh, offset)
+        dataobjects = self._dataobjects_at(offset)
 
         self.file = self
         self.mode = 'r'
@@ -212,6 +269,15 @@ class File(Group):
 
     def __repr__(self):
         return '<HDF5 file "%s" (mode r)>' % (os.path.basename(self.filename))
+
+    def _dataobjects_at(self, offset):
+        """ The parsed object header at ``offset``, parsed once (patched). """
+        dataobjs = self._objects.get(offset)
+        if dataobjs is None:
+            with self._lock:
+                dataobjs = DataObjects(self._fh, offset)
+            self._objects[offset] = dataobjs
+        return dataobjs
 
     def _get_object_by_address(self, obj_addr):
         """ Return the object pointed to by a given address. """
@@ -222,8 +288,12 @@ class File(Group):
 
     def close(self):
         """ Close the file. """
-        if self._close:
-            self._fh.close()
+        fh = getattr(self, '_fh', None)
+        if fh is not None:
+            chunkcache.forget_file(fh)
+        self._objects = {}
+        if self._close and fh is not None:
+            fh.close()
     __del__ = close
 
     def __enter__(self):
@@ -296,26 +366,32 @@ class Dataset(object):
         # every read by pyfive, so the result is kept -- the viewers slice
         # the same cube over and over.
         cache = getattr(self, '_cache', None)
+        lock = getattr(self.file, '_lock', None) or _NO_LOCK
         if cache is None and self._region_reads():
             region = self._region_of(args)
             if region is not None:
                 lo, hi, relative = region
-                data = self._dataobjects.get_region(lo, hi)[relative]
+                with lock:
+                    data = self._dataobjects.get_region(lo, hi)[relative]
                 if self._astype is None:
                     return data
                 return data.astype(self._astype)
         if cache is None:
-            cache = self._dataobjects.get_data()
+            with lock:
+                cache = self._dataobjects.get_data()
             if not isinstance(cache, np.memmap):
                 self._cache = cache
+                _CACHING_DATASETS.add(self)
         data = cache[args]
         if self._astype is None:
             return data
         return data.astype(self._astype)
 
     #: Chunked datasets larger than this are read chunk by chunk as they
-    #: are indexed rather than decompressed whole (patched in).
-    REGION_READ_BYTES = 64 * 1024 * 1024
+    #: are indexed rather than decompressed whole (patched in). 16 MB: a
+    #: whole copy of anything bigger is kept per open dataset, which is
+    #: memory the server may need elsewhere.
+    REGION_READ_BYTES = 16 * 1024 * 1024
 
     def _region_reads(self):
         try:
@@ -459,7 +535,8 @@ class Dataset(object):
     def attrs(self):
         """ attrs attribute. """
         if self._attrs is None:
-            self._attrs = self._dataobjects.get_attributes()
+            with getattr(self.file, '_lock', None) or _NO_LOCK:
+                self._attrs = self._dataobjects.get_attributes()
         return self._attrs
 
 

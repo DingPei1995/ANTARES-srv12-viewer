@@ -760,6 +760,7 @@ class ImagePanel(ttk.Frame):
         self._overlays = {}
         self._image = None
         self._keep_view = False
+        self._cursor_artists = []            # what the fast cursor path moves
 
         self.plot = PlotFrame(self, figsize=figsize)
         self.plot.pack(side="top", fill="both", expand=True)
@@ -783,6 +784,12 @@ class ImagePanel(ttk.Frame):
         if title:
             fig.suptitle(title, fontsize=10)
         self.plot.canvas.mpl_connect("button_press_event", self._on_click)
+        # A panel without EDC / MDC (a spatial map) moves its cursor by
+        # blitting: the rendered figure is kept, and a click only paints the
+        # two cursor lines over it -- no re-render, which over ssh -X is the
+        # slow part of a click.
+        self._background = None
+        self.plot.canvas.mpl_connect("draw_event", self._on_draw)
 
         self._build_controls(show_box_row)
 
@@ -827,7 +834,10 @@ class ImagePanel(ttk.Frame):
         self.equal_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(row1, text="1:1", variable=self.equal_var,
                         command=self.redraw).pack(side="left")
-        self.readout = ttk.Label(row1, text="", foreground="#333")
+        # Fixed width: a readout whose length changed with every click
+        # made the two panels of a window trade a few pixels, and each
+        # resize re-rendered both figures.
+        self.readout = ttk.Label(row1, text="", foreground="#333", width=30)
         self.readout.pack(side="left", padx=6)
 
         row2 = ttk.Frame(self)
@@ -902,12 +912,38 @@ class ImagePanel(ttk.Frame):
                        and self.y.size == y.size
                        and np.allclose([self.x[0], self.x[-1], self.y[0], self.y[-1]],
                                        [x[0], x[-1], y[0], y[-1]]))
+        same_shape = (not first and self.values.shape == values.shape)
+        labels_same = (x_label, y_label) == (self.x_label, self.y_label)
         self.values, self.x, self.y = values, x, y
         self.x_label, self.y_label = x_label, y_label
         if self.cursor is None or not keep_cursor or not self._inside(*self.cursor):
             self.cursor = (float(x[len(x) // 2]), float(y[len(y) // 2]))
         self._keep_view = keep_view and same_extent
+        if self._keep_view and same_shape and labels_same and self._replace_image():
+            return
         self.redraw()
+
+    def _replace_image(self):
+        """New values of the same shape on the same axes (the spectrum at
+        another pixel, another energy slice): swap the pixels of the image
+        that is already there instead of clearing and rebuilding the axes,
+        which is most of the cost of a click. False if that cannot be done
+        and a full :meth:`redraw` is needed."""
+        image = self._image
+        if image is None or not hasattr(image, "set_data") or \
+                not hasattr(image, "get_extent"):
+            return False
+        if not (uniform(self.x) and uniform(self.y)):
+            return False
+        try:
+            values = self.display_array()
+            image.set_data(values.T)
+            image.set_norm(self.norm(values))
+            image.set_cmap(get_cmap(self.cmap_name, self.flip))
+        except Exception:                                   # noqa: BLE001
+            return False
+        self._refresh_cursor(blit=False)       # the kept render is stale now
+        return True
 
     def _inside(self, cx, cy):
         return (self.x is not None and self.x[0] - 1e-12 <= cx <= self.x[-1] + 1e-12
@@ -1009,6 +1045,14 @@ class ImagePanel(ttk.Frame):
             self.ax_mdc.clear()
             self.ax_mdc.tick_params(labelbottom=False, labelsize=7)
             self.ax_edc.tick_params(labelleft=False, labelsize=7)
+            self.ax_mdc.set_ylabel("MDC", fontsize=8)
+            self.ax_edc.set_xlabel("EDC", fontsize=8)
+        self._cursor_artists = []
+        self._add_cursor_artists()
+
+    def _add_cursor_artists(self):
+        """The cursor lines, the integration bands and the EDC / MDC,
+        remembered so that :meth:`_refresh_cursor` can move them."""
         if self.cursor is None:
             return
         cx, cy = self.cursor
@@ -1022,20 +1066,67 @@ class ImagePanel(ttk.Frame):
         if not self.cursor_on.get():
             return
         col = self.cursor_color
-        self.ax.axvline(cx, color=col, lw=0.8)
-        self.ax.axhline(cy, color=col, lw=0.8)
-        if not self.curves:
+        blit = not self.curves
+        made = [self.ax.axvline(cx, color=col, lw=0.8, animated=blit),
+                self.ax.axhline(cy, color=col, lw=0.8, animated=blit)]
+        if self.curves:
+            (edc_x, edc_y, n_e), (mdc_x, mdc_y, n_m) = self.edc(), self.mdc()
+            made += self.ax_edc.plot(edc_y, edc_x, color=self.edc_color, lw=1)
+            made += self.ax_mdc.plot(mdc_x, mdc_y, color=self.mdc_color, lw=1)
+            wx, wy = self.half_widths()
+            if wx > 0:
+                made.append(self.ax.axvspan(cx - wx, cx + wx, color=self.edc_color, alpha=0.15))
+            if wy > 0:
+                made.append(self.ax.axhspan(cy - wy, cy + wy, color=self.mdc_color, alpha=0.15))
+        self._cursor_artists = made
+
+    def _refresh_cursor(self, blit=True):
+        """Move the cursor and redraw the EDC / MDC, leaving the image, the
+        box and the overlays as they are -- a click costs a line update,
+        not a rebuilt figure. ``blit=False`` when something else changed
+        too, so the figure has to be rendered again."""
+        if self._image is None or self.values is None:
+            self.redraw()
             return
-        (edc_x, edc_y, n_e), (mdc_x, mdc_y, n_m) = self.edc(), self.mdc()
-        self.ax_edc.plot(edc_y, edc_x, color=self.edc_color, lw=1)
-        self.ax_mdc.plot(mdc_x, mdc_y, color=self.mdc_color, lw=1)
-        wx, wy = self.half_widths()
-        if wx > 0:
-            self.ax.axvspan(cx - wx, cx + wx, color=self.edc_color, alpha=0.15)
-        if wy > 0:
-            self.ax.axhspan(cy - wy, cy + wy, color=self.mdc_color, alpha=0.15)
-        self.ax_mdc.set_ylabel("MDC", fontsize=8)
-        self.ax_edc.set_xlabel("EDC", fontsize=8)
+        for artist in self._cursor_artists:
+            try:
+                artist.remove()
+            except (ValueError, AttributeError, NotImplementedError):
+                pass
+        self._cursor_artists = []
+        self._add_cursor_artists()
+        if blit and not self.curves and self._background is not None:
+            try:
+                canvas = self.plot.canvas
+                canvas.restore_region(self._background)
+                for artist in self._cursor_artists:
+                    self.ax.draw_artist(artist)
+                canvas.blit(self.plot.figure.bbox)
+                return
+            except Exception:                               # noqa: BLE001
+                self._background = None
+        if self.curves:
+            # Only the free direction of each side panel: the other one is
+            # shared with the image.
+            self.ax_edc.relim()
+            self.ax_edc.autoscale_view(scalex=True, scaley=False)
+            self.ax_mdc.relim()
+            self.ax_mdc.autoscale_view(scalex=False, scaley=True)
+        self.plot.draw()
+
+    def _on_draw(self, event):
+        """After every full render: keep it (without the cursor) for
+        blitting, then paint the cursor on top."""
+        if self.curves:
+            return
+        try:
+            canvas = self.plot.canvas
+            self._background = canvas.copy_from_bbox(self.plot.figure.bbox)
+            for artist in self._cursor_artists:
+                if artist.get_animated():
+                    self.ax.draw_artist(artist)
+        except Exception:                                   # noqa: BLE001
+            self._background = None
 
     def _equal_limits(self):
         """One unit the same length on both axes, by widening whichever
@@ -1110,7 +1201,7 @@ class ImagePanel(ttk.Frame):
         self.status.configure(text="")
         self.cursor = (float(x), float(y))
         if redraw:
-            self.redraw()
+            self._refresh_cursor()
         if notify and self.on_cursor is not None:
             self.on_cursor(self, self.cursor[0], self.cursor[1])
         return True

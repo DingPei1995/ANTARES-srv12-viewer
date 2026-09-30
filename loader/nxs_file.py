@@ -68,6 +68,7 @@ Data "kinds" produced
 """
 
 import os
+import threading
 from contextlib import contextmanager
 import warnings
 from compat.dataclasses import dataclass, field
@@ -365,16 +366,20 @@ class _HandleRegistry:
 
     def __init__(self):
         self._open = {}          # abspath -> [h5py.File, refcount]
+        # Files are looked into from worker threads too (the loader
+        # window, multi-file loading), so the counting is locked.
+        self._lock = threading.RLock()
 
     def acquire(self, path):
         key = os.path.abspath(path)
-        entry = self._open.get(key)
-        if entry is not None and entry[0].id.valid:
-            entry[1] += 1
-            return entry[0]
-        handle = h5py.File(path, "r")
-        self._open[key] = [handle, 1]
-        return handle
+        with self._lock:
+            entry = self._open.get(key)
+            if entry is not None and entry[0].id.valid:
+                entry[1] += 1
+                return entry[0]
+            handle = h5py.File(path, "r")
+            self._open[key] = [handle, 1]
+            return handle
 
     def release(self, path, handle=None):
         """Give back one claim on ``path``. ``handle`` is the File the claim
@@ -382,18 +387,20 @@ class _HandleRegistry:
         found invalid), a release for the old one must not count against
         the new one's users -- that would close a file they are reading."""
         key = os.path.abspath(path)
-        entry = self._open.get(key)
-        if entry is None:
-            return
-        if handle is not None and entry[0] is not handle:
-            return
-        entry[1] -= 1
-        if entry[1] <= 0:
+        with self._lock:
+            entry = self._open.get(key)
+            if entry is None:
+                return
+            if handle is not None and entry[0] is not handle:
+                return
+            entry[1] -= 1
+            if entry[1] > 0:
+                return
             self._open.pop(key, None)
-            try:
-                entry[0].close()
-            except Exception:
-                pass
+        try:
+            entry[0].close()
+        except Exception:
+            pass
 
     def open_count(self):
         """Number of files currently held open (used by the tests)."""
@@ -487,6 +494,20 @@ class LazyCube:
     @property
     def nbytes(self):
         return self.size * self.dtype.itemsize
+
+    @property
+    def row_block(self):
+        """How many rows (first axis) one chunk of the file spans, so that a
+        routine streaming the cube row by row can read whole chunk bands at
+        a time instead of inflating the same chunks once per row. 1 for an
+        unchunked dataset."""
+        try:
+            chunks = self._dset.chunks
+            if chunks:
+                return max(1, int(chunks[self._perm[0]]))
+        except Exception:                                   # noqa: BLE001
+            pass
+        return 1
 
     def materialise(self):
         """Read the whole cube into memory, in this object's axis order.

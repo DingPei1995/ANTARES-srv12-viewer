@@ -44,6 +44,8 @@ from loader import session as nxs_session                             # noqa: E4
 from ui.data import NxsData, MemoryData                               # noqa: E402
 from ui import viewers                                                # noqa: E402
 from ui.list_actions import availability, kind_of as label_kind       # noqa: E402
+from ui import memory as memory_ui                                    # noqa: E402
+from tools import memory as memory_tools                              # noqa: E402
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".arpes_viewer", "config.json")
 
@@ -77,9 +79,11 @@ class App:
         self.order = []              # keys in list order
         self.viewers = []
         self.session = nxs_session.SessionStore()
-        self.config = system.load_config(CONFIG_PATH, defaults={
-            "FilePathLE": os.path.expanduser("~"),
-            "ColorMap": T.DEFAULT_COLORMAP, "FlipColorMap": False})
+        defaults = {"FilePathLE": os.path.expanduser("~"),
+                    "ColorMap": T.DEFAULT_COLORMAP, "FlipColorMap": False}
+        defaults.update(memory_ui.DEFAULTS)
+        self.config = system.load_config(CONFIG_PATH, defaults=defaults)
+        memory_ui.apply_settings(self)
         self.colormap = self.config.get("ColorMap", T.DEFAULT_COLORMAP)
         if self.colormap not in T.COLORMAP_NAMES:
             self.colormap = T.DEFAULT_COLORMAP
@@ -87,6 +91,10 @@ class App:
         self.info_window = None
         self.info_rows = []
         self._counter = 0
+        # The dataset of the row last clicked, kept open so that opening it
+        # next (the usual double-click) does not read the file a second
+        # time. Released when another row is clicked, and by Free memory.
+        self._held = None
         self.build()
 
     # ------------------------------------------------------------------
@@ -168,6 +176,8 @@ class App:
 
         self.status = ttk.Label(root, text="", anchor="w", relief="sunken")
         self.status.pack(side="bottom", fill="x")
+        self.memory_bar = memory_ui.MemoryBar(root, self)
+        self.memory_bar.pack(side="bottom", fill="x", padx=4, pady=(0, 2))
 
     def say(self, text):
         self.status.configure(text=text)
@@ -194,19 +204,22 @@ class App:
             self.folder_var.set(folder)
 
     def pick_files(self):
-        from ui.loader_dialog import file_types
+        from ui.filebrowser import FilePickerDialog
         start = self.folder_var.get()
         if not os.path.isdir(start):
             start = os.path.expanduser("~")
-        paths = filedialog.askopenfilenames(parent=self.root, title="Select data file(s)",
-                                            initialdir=start, filetypes=file_types())
+        dialog = FilePickerDialog(self.root, start)
+        paths = dialog.ask()
         if paths:
             self.folder_var.set(os.path.dirname(paths[0]))
             self.add_files(list(paths))
 
     def open_loader(self):
         from ui.loader_dialog import LoaderDialog
-        result = LoaderDialog(self.root, self.folder_var.get()).ask()
+        dialog = LoaderDialog(self.root, self.folder_var.get())
+        result = dialog.ask()
+        if dialog.last_folder and os.path.isdir(dialog.last_folder):
+            self.folder_var.set(dialog.last_folder)
         if not result:
             return None
         paths, options = result
@@ -376,7 +389,20 @@ class App:
             self.fill_info(key, data)
         self.say("%s: %s -- double-click to open it" % (self.label_for(key), data.kind))
         if record.get("memory") is None:
-            data.close()
+            self._hold(data)
+
+    def _hold(self, data):
+        """Keep ``data`` (one reference to it) until the next row is
+        clicked; see ``self._held``."""
+        previous, self._held = self._held, data
+        if previous is not None:
+            try:
+                previous.close()
+            except Exception:                               # noqa: BLE001
+                pass
+
+    def _release_held(self):
+        self._hold(None)
 
     def fill_axes(self, data):
         for item in self.axis_table.get_children():
@@ -735,6 +761,7 @@ class App:
         self._remove_keys(keys)
 
     def _remove_keys(self, keys):
+        self._release_held()
         for key in keys:
             record = self.items.pop(key, None)
             if key in self.order:
@@ -813,6 +840,115 @@ class App:
         return not problems
 
     # ------------------------------------------------------------------
+    # Memory
+    # ------------------------------------------------------------------
+    def _in_a_window(self, data):
+        for window in self.viewers:
+            if getattr(window, "data", None) is data:
+                return True
+        return False
+
+    def memory_datasets(self):
+        """The computed datasets held in memory, for the Memory panel."""
+        rows = []
+        for key in self.order:
+            record = self.items.get(key)
+            data = record.get("memory") if record else None
+            if data is None:
+                continue
+            backing = record.get("backing")
+            rows.append({"key": key, "name": record["name"],
+                         "bytes": memory_tools.array_bytes(data),
+                         "autosaved": bool(backing and os.path.isfile(backing)),
+                         "open": self._in_a_window(data)})
+        return rows
+
+    def memory_windows(self):
+        rows = []
+        for window in list(self.viewers):
+            try:
+                title = window.title()
+            except tk.TclError:
+                continue
+            rows.append({"window": window, "title": title,
+                         "bytes": memory_tools.array_bytes(getattr(window, "data", None))})
+        return rows
+
+    def open_file_count(self):
+        from loader.nxs_file import HANDLES
+        return HANDLES.open_count()
+
+    def unload_datasets(self, keys=None):
+        """Drop the in-memory copy of computed datasets that are auto-saved
+        and not in use; the row then reads its auto-saved file when opened.
+        Returns ``(count, bytes, [(name, why kept), ...])``."""
+        keys = list(keys) if keys is not None else \
+            [k for k in self.order if self.items.get(k, {}).get("memory") is not None]
+        count, freed, skipped = 0, 0, []
+        # A closed window is a cycle of Tk widgets that still points at its
+        # dataset until the garbage collector has run; collect first so
+        # that it does not count as a user below.
+        import gc
+        gc.collect()
+        for key in keys:
+            record = self.items.get(key)
+            if record is None or record.get("memory") is None:
+                continue
+            data = record["memory"]
+            backing = record.get("backing")
+            if not (backing and os.path.isfile(backing)):
+                skipped.append((record["name"], "not auto-saved (save it first)"))
+                continue
+            if self._in_a_window(data):
+                skipped.append((record["name"], "open in a window"))
+                continue
+            # 3 = this record, the local name, getrefcount's own argument:
+            # anything more is some window or tool still using it, and
+            # dropping the list's copy would free nothing.
+            if sys.getrefcount(data) > 3:
+                skipped.append((record["name"], "still used by a tool window"))
+                continue
+            freed += memory_tools.array_bytes(data)
+            record["memory"] = None
+            record["path"] = backing
+            record["options"] = None
+            count += 1
+            try:
+                self.tree.set(record["iid"], "where", "computed, on disk (auto-saved)")
+            except tk.TclError:
+                pass
+            del data
+        return count, freed, skipped
+
+    def free_memory(self, unload=False):
+        """Give back what can be given back; a one-line report."""
+        before = memory_tools.process_memory()["rss"]
+        self._release_held()
+        cached = memory_tools.free_reader_caches()
+        parts = ["caches %s" % memory_tools.fmt_bytes(cached)]
+        if unload:
+            count, freed, skipped = self.unload_datasets()
+            parts.append("%d dataset(s) moved to disk (%s)" % (count, memory_tools.fmt_bytes(freed)))
+            if skipped:
+                parts.append("%d kept (in use / not saved)" % len(skipped))
+        memory_tools.trim()
+        after = memory_tools.process_memory()["rss"]
+        text = "Freed: " + ", ".join(parts)
+        if before is not None and after is not None:
+            text += ". This program: %s -> %s" % (memory_tools.fmt_bytes(before),
+                                                   memory_tools.fmt_bytes(after))
+        return text
+
+    def save_config(self):
+        self.config["FilePathLE"] = self.folder_var.get()
+        self.config["ColorMap"] = self.colormap
+        self.config["FlipColorMap"] = self.flip
+        try:
+            system.dump_config(CONFIG_PATH, self.config)
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    # ------------------------------------------------------------------
     # Session: log, recovery, closing
     # ------------------------------------------------------------------
     def show_operations_log(self):
@@ -876,13 +1012,8 @@ class App:
         pending = self.unsaved()
         if pending and not self.offer_to_save("Close ARPES viewer", pending, "Close the program?"):
             return
-        self.config["FilePathLE"] = self.folder_var.get()
-        self.config["ColorMap"] = self.colormap
-        self.config["FlipColorMap"] = self.flip
-        try:
-            system.dump_config(CONFIG_PATH, self.config)
-        except Exception:                                   # noqa: BLE001
-            pass
+        self.save_config()
+        self._release_held()
         self.session.log("END", "", self.session.folder, "session closed")
         self.root.destroy()
 

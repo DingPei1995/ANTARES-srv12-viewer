@@ -23,6 +23,13 @@ with `ssh -X` / `ssh -Y`, or use VNC / NoMachine).
 > （`compat/pyfive`），不需要 h5py；程序自己的保存格式改为 `.npz`（旧版保存的
 > `.nxs` 仍可读取）。原来需要鼠标拖动获取的参数（光标、选区框、点、范围、3D
 > 视角等）全部改为可手动输入的数值；图上点击只是帮你填入这些数值。
+>
+> 本次更新：(1) Loader 窗口内置文件浏览器，直接列出文件夹里的文件（不再依赖
+> 服务器上只显示文件夹的 Tk 文件对话框），可多选、按名称过滤；(2) SPEM 读取
+> 提速：HDF5 对象头只解析一次、解压后的数据块进入有上限的缓存、点击光标只重画
+> 光标线；(3) 主窗口底部显示本程序和服务器的内存占用，**Free memory** 释放缓存，
+> **Memory...** 面板可查看服务器上占内存最多的进程、把计算结果移出内存、关闭窗口，
+> 并设置低内存警告与自动释放。
 
 ---
 
@@ -53,8 +60,16 @@ the same.
 
 **Load data...** opens the Loader window:
 
-- **Files** -- pick one or many (*Select file(s)...*), or every recognised
-  file of a folder (*Whole folder...*).
+- **Browse** -- the folder's files, listed by the program itself (the Tk
+  file dialog on the server showed the folders but not the files in them).
+  Type or paste a folder and press Enter, or use *Up* / *Home* /
+  double-click a folder. *Show* switches between the recognised data files
+  (by extension, any letter case) and all files; *Name filter* narrows the
+  list (plain text or `*` / `?` wildcards). Double-click a file, or select
+  several (Shift / Ctrl + click) and press *Add selected*, or *Add every data
+  file in this folder*. The system dialog is still there
+  (*System dialog...*) as a fallback.
+- **Files to load** -- what will be added; *Remove selected* / *Clear*.
 - **Reader** -- detection is automatic and says what it found; override it
   when a file from an unfamiliar layout is misread. Files this program saved
   are always recognised.
@@ -64,7 +79,10 @@ the same.
 - **First axis of a map is** -- angle (default), photon energy,
   temperature, gate voltage ... Only an angle axis is offered a k conversion.
 
-**Quick add files...** skips the options.
+**Quick add files...** skips the options (same browser, in a small window).
+
+What is inside the chosen files is worked out on a worker thread, so the
+Loader never freezes on a long list, and each file is only looked at once.
 
 A numbered CASSIOPEE folder (`<name>_1_ROI1_.txt`, `<name>_2_ROI1_.txt`, ...)
 is listed once, as the assembled cube: a `map` when the polar angle was
@@ -182,6 +200,48 @@ offered back; closing with unsaved computed data asks first.
 **Save...** writes the selected datasets to one `.npz` file, which this
 program opens again (all rows come back, with their metadata).
 
+## Memory
+
+The line at the bottom of the main window shows this program's memory and
+how full the **server's** memory is (all users, all programs; green / orange
+/ red), updated every few seconds.
+
+- **Free memory** gives back what the program keeps only for speed: the
+  HDF5 reader's caches (decompressed chunks, small datasets read whole) and
+  the file behind the row last clicked; then Python's garbage collector and
+  `malloc_trim`, so the freed memory really goes back to the server.
+- **Memory...** opens the panel: the program's memory now / at its peak /
+  in swap and what its caches hold; the computed datasets held in memory
+  (**Move selected out of memory** -- they are auto-saved, stay in the list,
+  and are read back from disk when opened); the open viewer windows (**Close
+  selected windows**); the largest processes on the server; and the
+  settings, kept for next time:
+  - warn when the server has less than *N* % free (default 10 %), and then
+    free the program's caches by itself;
+  - warn when this program uses more than *N* GB (0 = never);
+  - the ceiling of the HDF5 chunk cache (default 256 MB).
+
+**Free everything possible** does both: the caches, and every computed
+dataset that is auto-saved and not open in a window.
+
+## Speed of SPEM (spatial) scans
+
+A spatial scan stays in its file and is read as you move around it. Three
+things make that fast with the bundled pure-Python HDF5 reader:
+
+- each HDF5 object header is parsed once per file (reading the metadata of
+  a scan used to re-parse every group on every lookup);
+- decompressed chunks are kept in a shared cache with a hard ceiling (the
+  setting above), so the spectrum of a nearby pixel costs nothing; region
+  sums and the overview stream the cube in bands that follow the file's
+  chunking, so each chunk is inflated once;
+- a click on the spatial map only redraws the cursor lines (the map itself
+  is not re-rendered), and a new spectrum of the same size replaces the
+  pixels of the image instead of rebuilding the plot.
+
+The row last clicked in the main list is kept open, so double-clicking it
+does not read the file a second time.
+
 ## Long operations
 
 Conversions, fits over many lines, de-gridding and multi-file loading run
@@ -202,7 +262,8 @@ loader/           reading data in, and keeping it          (no GUI)
 tools/            the algorithms                           (no GUI)
 ui/               the windows (tkinter + matplotlib)
 compat/           what Python 3.6 / the server lacks: the dataclasses
-                  backport, the pure-Python HDF5 reader (pyfive, patched),
+                  backport, the pure-Python HDF5 reader (pyfive, patched;
+                  its chunk cache is compat/pyfive/chunkcache.py),
                   numpy helpers
 ```
 
@@ -212,8 +273,11 @@ compat/           what Python 3.6 / the server lacks: the dataclasses
 | `loader/registry.py` | Which reader opens a file; load-time axis order and axis role. |
 | `loader/soleil.py`, `cassiopee.py`, `cassiopee_spin.py`, `native.py` | The readers. |
 | `loader/session.py` | Autosave folder, memory budget, operations log. |
+| `tools/memory.py` | Memory of the program and of the server (from `/proc`), the largest processes, freeing (`gc`, `malloc_trim`, the reader's caches). |
 | `tools/*.py` | k conversion (`kspace`, `cutk`, `kzconv`), Fermi edge (`fermi`), peaks and dispersion (`peaks`, `dispersion`), processing (`process`, `volume`), `curves`, `spin`, `degrid`, `cutops`, `kzmap`, Brillouin zones (`lattice`, `spacegroups`, `bz2d`, `bz3d`, `moire`, `cleavage`), `dataops`, `colormaps`, `system`. |
 | `ui/tkbase.py` | Forms, the worker thread + progress window, the image panel, the slice slider, colormaps. |
+| `ui/filebrowser.py` | The folder browser of the Loader and of *Quick add files...*. |
+| `ui/memory.py` | The memory line of the main window and the Memory panel. |
 | `ui/tktext.py` | Draws non-Latin-1 labels (Å⁻¹, σ, Γ, →) as ASCII on Tk installations without Unicode fonts (set `ARPES_UNICODE=1` to turn off). |
 | `ui/data.py` | The dataset objects the viewers use (`NxsData`, `MemoryData`). |
 | `ui/viewers.py` | Cut, contour + cuts, spatial scan, pop-out windows. |

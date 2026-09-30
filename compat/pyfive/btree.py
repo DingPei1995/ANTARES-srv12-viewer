@@ -1,6 +1,7 @@
 """ HDF5 B-Trees and contents. """
 
 from collections import OrderedDict
+import itertools
 import struct
 import zlib
 
@@ -9,6 +10,7 @@ import numpy as np
 from .core import _padded_size
 from .core import _unpack_struct_from_file
 from .core import Reference
+from . import chunkcache
 
 
 class AbstractBTree(object):
@@ -150,38 +152,63 @@ class BTreeV1RawDataChunks(BTreeV1):
         node['addresses'] = addresses
         return node
 
+    def _chunk_index(self):
+        """ ``{chunk start: (node key, address)}``, built once (patched). """
+        index = getattr(self, '_index', None)
+        if index is None:
+            index = {}
+            for node in self.all_nodes[0]:
+                for node_key, addr in zip(node['keys'], node['addresses']):
+                    index[tuple(node_key['chunk_offset'][:-1])] = (node_key, addr)
+            self._index = index
+        return index
+
+    def _read_chunk(self, node_key, addr, chunk_shape, dtype, filter_pipeline):
+        """ One chunk, decompressed, through the shared chunk cache. """
+        chunk = chunkcache.get(self.fh, addr)
+        if chunk is not None:
+            return chunk
+        count = int(np.prod(chunk_shape))
+        itemsize = dtype.itemsize
+        self.fh.seek(addr)
+        if filter_pipeline is None:
+            chunk_buffer = self.fh.read(count * itemsize)
+        else:
+            chunk_buffer = self.fh.read(node_key['chunk_size'])
+            chunk_buffer = self._filter_chunk(
+                chunk_buffer, node_key['filter_mask'],
+                filter_pipeline, itemsize)
+        chunk = np.frombuffer(chunk_buffer, dtype=dtype,
+                              count=count).reshape(chunk_shape)
+        chunkcache.put(self.fh, addr, chunk)
+        return chunk
+
     def read_region(self, chunk_shape, data_shape, dtype, filter_pipeline,
                     lo, hi):
         """ Patched in (ARPES viewer): only the part ``lo <= index < hi``
         of a numeric chunked dataset, decompressing only the chunks that
         touch it -- a cursor move on a gigabyte cube reads a few chunks,
-        not the cube. """
+        not the cube. The chunks are found through an index (not by
+        scanning every chunk of the dataset) and kept in a shared,
+        size-limited cache, so the next read nearby costs nothing. """
         dtype = np.dtype(dtype)
-        itemsize = dtype.itemsize
-        count = int(np.prod(chunk_shape))
         out = np.zeros([h - l for l, h in zip(lo, hi)], dtype=dtype)
-        for node in self.all_nodes[0]:
-            for node_key, addr in zip(node['keys'], node['addresses']):
-                start = node_key['chunk_offset'][:-1]
-                if any(s >= h or s + c <= l for s, c, l, h in
-                       zip(start, chunk_shape, lo, hi)):
-                    continue
-                self.fh.seek(addr)
-                if filter_pipeline is None:
-                    chunk_buffer = self.fh.read(count * itemsize)
-                else:
-                    chunk_buffer = self.fh.read(node_key['chunk_size'])
-                    chunk_buffer = self._filter_chunk(
-                        chunk_buffer, node_key['filter_mask'],
-                        filter_pipeline, itemsize)
-                chunk = np.frombuffer(chunk_buffer, dtype=dtype,
-                                      count=count).reshape(chunk_shape)
-                src, dst = [], []
-                for s, c, l, h in zip(start, chunk_shape, lo, hi):
-                    a, b = max(s, l), min(s + c, h)
-                    src.append(slice(a - s, b - s))
-                    dst.append(slice(a - l, b - l))
-                out[tuple(dst)] = chunk[tuple(src)]
+        index = self._chunk_index()
+        starts = [range((l // c) * c, h, c)
+                  for l, h, c in zip(lo, hi, chunk_shape)]
+        for start in itertools.product(*starts):
+            entry = index.get(start)
+            if entry is None:            # never written: stays at zero
+                continue
+            node_key, addr = entry
+            chunk = self._read_chunk(node_key, addr, chunk_shape, dtype,
+                                     filter_pipeline)
+            src, dst = [], []
+            for s, c, l, h in zip(start, chunk_shape, lo, hi):
+                a, b = max(s, l), min(s + c, h)
+                src.append(slice(a - s, b - s))
+                dst.append(slice(a - l, b - l))
+            out[tuple(dst)] = chunk[tuple(src)]
         return out
 
     def construct_data_from_chunks(
@@ -250,14 +277,16 @@ class BTreeV1RawDataChunks(BTreeV1):
             if filter_id == GZIP_DEFLATE_FILTER:
                 chunk_buffer = zlib.decompress(chunk_buffer)
             elif filter_id == SHUFFLE_FILTER:
-                buffer_size = len(chunk_buffer)
-                unshuffled_buffer = bytearray(buffer_size)
-                step = buffer_size // itemsize
-                for j in range(itemsize):
-                    start = j * step
-                    end = (j+1) * step
-                    unshuffled_buffer[j::itemsize] = chunk_buffer[start:end]
-                chunk_buffer = unshuffled_buffer
+                # Patched (ARPES viewer): one numpy transpose instead of a
+                # Python loop over bytes. Trailing bytes that do not make a
+                # whole element are left as they are, as HDF5 does.
+                raw = np.frombuffer(chunk_buffer, dtype=np.uint8)
+                step = raw.size // itemsize
+                whole = step * itemsize
+                unshuffled = raw[:whole].reshape(itemsize, step).T.reshape(-1)
+                if whole < raw.size:
+                    unshuffled = np.concatenate([unshuffled, raw[whole:]])
+                chunk_buffer = unshuffled.tobytes()
             elif filter_id == FLETCH32_FILTER:
                 cls._verify_fletcher32(chunk_buffer)
                 # strip off 4-byte checksum from end of buffer
@@ -275,10 +304,19 @@ class BTreeV1RawDataChunks(BTreeV1):
             arr = np.frombuffer(chunk_buffer[:-4]+b'\x00', '<u2')
         else:
             arr = np.frombuffer(chunk_buffer[:-4], '<u2')
+        # Patched (ARPES viewer): the same two running sums, in closed form
+        # and in numpy (sum2 is the sum of the running sum1, i.e. each value
+        # weighted by how many terms follow it), block by block so the
+        # 64-bit accumulators cannot overflow.
+        n = arr.size
         sum1 = sum2 = 0
-        for i in arr:
-            sum1 = (sum1 + i) % 65535
-            sum2 = (sum2 + sum1) % 65535
+        block = 1 << 16
+        for first in range(0, n, block):
+            part = arr[first:first + block].astype(np.uint64)
+            weights = np.arange(n - first, n - first - part.size,
+                                -1).astype(np.uint64)
+            sum1 = (sum1 + int(part.sum())) % 65535
+            sum2 = (sum2 + int((part * weights).sum())) % 65535
 
         # extract stored checksums
         ref_sum1, ref_sum2 = np.frombuffer(chunk_buffer[-4:], '>u2')
