@@ -431,6 +431,53 @@ class _HandleRegistry:
 HANDLES = _HandleRegistry()
 
 
+def read_whole(dataset, progress=None):
+    """Every point of an HDF5 dataset, as a numpy array.
+
+    With ``progress(done, total)`` the read goes in bands along the first
+    axis, each a whole number of chunks thick, so every chunk is inflated
+    exactly once and the caller can show (and cancel) the progress. The
+    reader's own whole copy of a small dataset (see the patched
+    ``Dataset.__getitem__``) is dropped afterwards: the caller keeps the
+    array, and a second copy in the reader would only double the memory.
+    """
+    shape = tuple(dataset.shape)
+    if not shape or progress is None or shape[0] < 2:
+        data = np.asarray(dataset[()])
+    else:
+        n = shape[0]
+        step = n
+        try:
+            chunks = dataset.chunks
+            if chunks:
+                step = max(1, int(chunks[0]))
+        except Exception:                                   # noqa: BLE001
+            pass
+        if step < n:
+            # about 50 bands at most: enough for a smooth progress bar
+            step *= max(1, (n // step) // 50)
+        else:
+            step = max(1, n // 20)
+        data = None
+        for start in range(0, n, step):
+            stop = min(n, start + step)
+            band = np.asarray(dataset[start:stop])
+            if data is None:
+                data = np.empty(shape, dtype=band.dtype)
+            data[start:stop] = band
+            progress(stop, n)
+    if isinstance(data, np.memmap):
+        # an uncompressed dataset comes back mapped onto the file: copy it,
+        # so that it really is in memory and the file can be let go
+        data = np.array(data)
+    if getattr(dataset, "_cache", None) is not None:
+        try:
+            dataset._cache = None
+        except Exception:                                   # noqa: BLE001
+            pass
+    return data
+
+
 class LazyCube:
     """A 4D cube that stays on disk, presented in (y, x, k, E) order.
 
@@ -509,11 +556,10 @@ class LazyCube:
             pass
         return 1
 
-    def materialise(self):
-        """Read the whole cube into memory, in this object's axis order.
-        Only for callers that genuinely need every point; everything in the
-        GUI avoids this."""
-        return self[(slice(None),) * self.ndim]
+    def materialise(self, progress=None):
+        """Read the whole cube into memory, in this object's axis order
+        (``progress(done, total)`` as in :func:`read_whole`)."""
+        return np.transpose(read_whole(self._dset, progress), self._perm)
 
     def __array__(self, dtype=None):
         """So ``np.asarray(cube)`` works -- see :class:`LazyArray`."""
@@ -555,8 +601,8 @@ class LazyArray:
     def __getitem__(self, key):
         return self._dset[key]
 
-    def materialise(self):
-        return self._dset[()]
+    def materialise(self, progress=None):
+        return read_whole(self._dset, progress)
 
     def __array__(self, dtype=None):
         data = self.materialise()

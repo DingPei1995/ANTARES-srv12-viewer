@@ -17,9 +17,9 @@ dataset is, and a **double-click** opens it in its own viewer window:
 - a curve (EDC, MDC, spin EDC) opens in the curve viewer.
 
 Everything a viewer computes (a k-map, a cut, a processed dataset...) is
-added to this list and auto-saved to this session's folder
-(``~/.arpes_viewer/sessions``), so that closing -- or losing -- the program
-does not lose the work. Right-click a row for what acts on datasets.
+added to this list. It is kept in memory only -- this version does not
+auto-save (the server is short of disk space) -- so use Save... for what
+should outlive the program. Right-click a row for what acts on datasets.
 """
 import csv
 import os
@@ -52,6 +52,11 @@ CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".arpes_viewer", "config.jso
 #: Kinds that are not auto-saved: a spatial scan is the measurement itself,
 #: gigabytes of it.
 NO_AUTOSAVE_KINDS = ("spem_4d", "spem_1d")
+
+#: Write every computed dataset to the session folder as it is made. Off on
+#: srv12: the server does not have the disk space, and the copies were never
+#: cleaned up before the program ended.
+AUTOSAVE = False
 
 #: Which axes each kind shows in the Data information table.
 DATA_INFO_AXES = {
@@ -95,6 +100,7 @@ class App:
         # next (the usual double-click) does not read the file a second
         # time. Released when another row is clicked, and by Free memory.
         self._held = None
+        self._trim_pending = False
         self.build()
 
     # ------------------------------------------------------------------
@@ -288,7 +294,7 @@ class App:
         return T.unique_name(base, self.names())
 
     def autosave(self, data, name):
-        if getattr(data, "kind", None) in NO_AUTOSAVE_KINDS:
+        if not AUTOSAVE or getattr(data, "kind", None) in NO_AUTOSAVE_KINDS:
             return None
         try:
             return self.session.store_data(data, name)
@@ -298,7 +304,8 @@ class App:
             return None
 
     def add_dataset(self, data, label=None):
-        """List a dataset computed in this session (and auto-save it)."""
+        """List a dataset computed in this session (auto-saved only when
+        :data:`AUTOSAVE` is on)."""
         kind = KIND_LABELS.get(getattr(data, "kind", ""), getattr(data, "kind", "unknown"))
         label = self.unique_name(label or getattr(data, "source_label", "computed"))
         if hasattr(data, "source_label"):
@@ -569,6 +576,9 @@ class App:
     def _open(self, data, label, key=None):
         try:
             window = viewers.open_viewer(self, data, label, self.colormap, self.flip)
+        except T.JobCancelled:
+            self.say("Opening %s cancelled" % label)
+            return None
         except Exception as exc:                            # noqa: BLE001
             traceback.print_exc()
             T.warning(self.root, "Open", "Could not open %s:\n%s" % (label, exc))
@@ -611,6 +621,28 @@ class App:
     def forget_viewer(self, window):
         if window in self.viewers:
             self.viewers.remove(window)
+        # The dataset a closed window showed: if the row last clicked holds
+        # it too and no other window uses it, let it go now rather than
+        # when another row is clicked, so closing a window gives its memory
+        # back.
+        data = getattr(window, "data", None)
+        if data is not None and data is self._held and not any(
+                getattr(w, "data", None) is data for w in self.viewers):
+            self._release_held()
+        if not self._trim_pending:
+            self._trim_pending = True
+            self.root.after(300, self._trim_after_close)
+
+    def _trim_after_close(self):
+        """After windows close: collect the Tk / matplotlib cycles that
+        still point at their arrays, and return the freed heap to the
+        system (malloc_trim)."""
+        self._trim_pending = False
+        try:
+            memory_tools.trim()
+            self.memory_bar.update_now(reschedule=False)
+        except Exception:                                   # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------
     # Operations on the selection
@@ -753,7 +785,7 @@ class App:
         detail = ""
         if computed:
             detail = ("\n\n%d of them were computed in this session and not saved "
-                      "anywhere of your own; their auto-saved copies go too." % len(computed))
+                      "anywhere of your own; they will be gone." % len(computed))
         if not T.ask_yes_no(self.root, "Remove from list",
                             "Remove %d dataset(s) from the list?\n\nFiles on disk are "
                             "not deleted.%s" % (len(keys), detail)):
@@ -897,7 +929,8 @@ class App:
             data = record["memory"]
             backing = record.get("backing")
             if not (backing and os.path.isfile(backing)):
-                skipped.append((record["name"], "not auto-saved (save it first)"))
+                skipped.append((record["name"], "only in memory (Save... it first, "
+                                                "or remove it from the list)"))
                 continue
             if self._in_a_window(data):
                 skipped.append((record["name"], "open in a window"))
@@ -994,10 +1027,10 @@ class App:
         from tkinter import messagebox
         answer = messagebox.askyesnocancel(
             title, "%s\n\n%d dataset(s) computed in this session have not been saved "
-            "to a file of your own:\n%s\n\nThey are auto-saved to %s (cleared after "
-            "%d days).\n\nYes = save them to a file first, No = go on without saving, "
-            "Cancel = stop." % (text, len(pending), shown, self.session.folder,
-                                nxs_session.KEEP_DAYS), parent=self.root)
+            "to a file of your own:\n%s\n\nThey are only in memory (auto-save is "
+            "off) and are lost when the program closes.\n\nYes = save them to a "
+            "file first, No = go on without saving, Cancel = stop."
+            % (text, len(pending), shown), parent=self.root)
         if answer is None:
             return False
         if answer is False:

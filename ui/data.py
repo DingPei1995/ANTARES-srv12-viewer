@@ -242,7 +242,9 @@ class NxsData:
         return self._refs > 0
 
     def close(self):
-        """Release one reference; the file closes when the last one goes."""
+        """Release one reference; the file closes when the last one goes,
+        and an array read into memory (:meth:`load_into_memory`) is
+        dropped with it."""
         self._refs -= 1
         if self._refs > 0:
             return
@@ -250,6 +252,49 @@ class NxsData:
             NxsData._open_files.pop(self._key, None)
             self._key = None
         self.scan.close()
+        if getattr(self, "_loaded", False):
+            self.scan.value = None
+            self._loaded = False
+        self._overview = None
+
+    # -- reading the whole dataset ----------------------------------------
+    def in_memory(self):
+        """Whether slicing this dataset no longer touches the file. A
+        spatial scan (spem_4d) is always left in its file: it is far too
+        big, and it is read a spectrum at a time."""
+        if self.kind == "spem_4d":
+            return True
+        value = self.scan.value
+        return value is None or (isinstance(value, np.ndarray)
+                                 and not isinstance(value, np.memmap))
+
+    def read_into_memory(self, progress=None):
+        """The whole array, read from the file (``progress(done, total)``).
+        Safe to run on a worker thread; hand the result to
+        :meth:`keep_in_memory` on the GUI thread."""
+        value = self.scan.value
+        if hasattr(value, "materialise"):
+            try:
+                return np.asarray(value.materialise(progress=progress))
+            except TypeError:                       # no progress argument
+                return np.asarray(value.materialise())
+        return np.array(value)
+
+    def keep_in_memory(self, array):
+        """Use ``array`` (from :meth:`read_into_memory`) instead of the
+        file: every slice after this is a numpy slice, and the file is let
+        go."""
+        if self.in_memory():
+            return
+        self.scan.value = array
+        self._loaded = True
+        if self.scan.value4d is None and not self.scan.previews:
+            self.scan.close()
+
+    def load_into_memory(self, progress=None):
+        """:meth:`read_into_memory` and :meth:`keep_in_memory` in one go."""
+        if not self.in_memory():
+            self.keep_in_memory(self.read_into_memory(progress))
 
     # -- spem_4d --------------------------------------------------------
     def _overview_from_preview(self):

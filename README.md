@@ -30,6 +30,17 @@ with `ssh -X` / `ssh -Y`, or use VNC / NoMachine).
 > 光标线；(3) 主窗口底部显示本程序和服务器的内存占用，**Free memory** 释放缓存，
 > **Memory...** 面板可查看服务器上占内存最多的进程、把计算结果移出内存、关闭窗口，
 > 并设置低内存警告与自动释放。
+>
+> 再次更新（界面流畅度与内存）：(1) Map（以及 cut、程序自己保存的 .nxs 数据等，
+> **SPEM 4D 除外**）在打开窗口时一次性读入内存（带进度条，可取消），之后拖动能量
+> 滑块、移动光标只是切 numpy 数组，不再反复读文件解压；在主列表里单击一行仍只读
+> 结构信息，不读数据。(2) 画图提速：轴不均匀（如偏转角读回值有微小抖动）时以前用
+> pcolormesh 逐格上色，非常慢，现在映射到均匀像素网格后用 imshow；图像、光标和
+> EDC/MDC 作为动画对象覆盖在缓存的坐标轴背景上（blit），换切片、点光标、换
+> colormap 都不再重画整张图（导出图片和工具栏保存仍包含全部内容）。(3) 关闭数据
+> 窗口即释放其占用的内存（数据数组、副本、图像，并做 gc 与 malloc_trim）。
+> (4) 本版本**不再自动保存**计算结果（服务器磁盘空间不足）：计算结果只在内存中，
+> 需要保留的请用 **Save...** 保存；关闭程序时仍会提示未保存的结果。
 
 ---
 
@@ -188,14 +199,15 @@ the cursor.
 - **3D view** -- orthogonal slices, notched cube, maximum-intensity / sum /
   alpha-composite projections, isosurface.
 
-## Nothing is lost: autosave, the log, and recovery
+## Saving computed data (auto-save is off)
 
-Every computed dataset is written to this run's session folder
-(`~/.arpes_viewer/sessions/`) the moment it exists (spatial scans excepted).
-Session folders are deleted after three days, or as soon as the dataset has
-been saved to a file of your own. `operations.log` there records every
-store / save / discard. On startup, datasets left by an earlier session are
-offered back; closing with unsaved computed data asks first.
+This version does **not** auto-save: the server is short of disk space, so
+computed datasets live in memory only (`AUTOSAVE` in `ARPES_viewer.py`
+turns the old behaviour back on). Closing the program with unsaved computed
+data asks first. Session folders left by earlier versions under
+`~/.arpes_viewer/sessions/` are still offered back at startup and deleted
+after three days; `operations.log` there still records saves and
+discards.
 
 **Save...** writes the selected datasets to one `.npz` file, which this
 program opens again (all rows come back, with their metadata).
@@ -212,8 +224,9 @@ how full the **server's** memory is (all users, all programs; green / orange
   `malloc_trim`, so the freed memory really goes back to the server.
 - **Memory...** opens the panel: the program's memory now / at its peak /
   in swap and what its caches hold; the computed datasets held in memory
-  (**Move selected out of memory** -- they are auto-saved, stay in the list,
-  and are read back from disk when opened); the open viewer windows (**Close
+  (**Move selected out of memory** -- only for those with a copy on disk,
+  i.e. recovered from an earlier session; one that is only in memory is
+  freed by removing it from the list); the open viewer windows (**Close
   selected windows**); the largest processes on the server; and the
   settings, kept for next time:
   - warn when the server has less than *N* % free (default 10 %), and then
@@ -222,7 +235,22 @@ how full the **server's** memory is (all users, all programs; green / orange
   - the ceiling of the HDF5 chunk cache (default 256 MB).
 
 **Free everything possible** does both: the caches, and every computed
-dataset that is auto-saved and not open in a window.
+dataset with a copy on disk that is not open in a window.
+
+Closing a viewer window gives its memory back by itself: the dataset read
+into memory for it (unless another window still shows it), any copy it
+made, and its images, followed by garbage collection and `malloc_trim`.
+
+## Maps and cuts are read into memory
+
+Everything except a 4-D spatial scan (SPEM) is read whole when its window
+opens (with a progress window and Cancel), and the file is let go; moving
+the energy slider or the cursor then slices a numpy array instead of
+reading and inflating HDF5 chunks again. Clicking a row in the list still
+reads only its structure. The image panels draw the image, the cursor and
+the EDC / MDC over a kept render of the axes (blitting), map unevenly spaced
+axes onto an even pixel grid instead of using `pcolormesh`, and re-render
+the whole figure only when the axes change.
 
 ## Speed of SPEM (spatial) scans
 

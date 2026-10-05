@@ -12,8 +12,10 @@ running on the same server.
 * :class:`MemoryPanel` -- the details: the program's memory and what is in
   it (the HDF5 reader's caches, the datasets held in memory, the open
   windows), the server's memory and its largest processes, and the controls:
-  free caches, move computed datasets out of memory (they are auto-saved,
-  and are read back from disk when opened), close windows, and the limits.
+  free caches, move computed datasets that have a copy on disk out of
+  memory (read back when opened; auto-save is off in this version, so only
+  datasets recovered from an earlier session have one), close windows, and
+  the limits. Closing a viewer gives its memory back by itself.
 
 What "free" does is in :mod:`tools.memory`; the list of datasets and windows
 is the launcher's (``App.memory_datasets`` / ``memory_windows`` /
@@ -199,8 +201,9 @@ class MemoryPanel(tk.Toplevel):
         ttk.Button(row, text="Free everything possible",
                    command=lambda: self.free(True)).pack(side="left", padx=4)
         ttk.Label(row, foreground="#555", text=(
-            "Everything = caches + computed datasets not open in a window "
-            "(they stay in the list, read back from disk when opened)")).pack(side="left", padx=4)
+            "Everything = caches + computed datasets with a copy on disk, not "
+            "open in a window. To free one that is only in memory, remove it "
+            "from the list.")).pack(side="left", padx=4)
 
         panes = ttk.Frame(self)
         panes.pack(fill="both", expand=True, padx=8, pady=4)
@@ -316,7 +319,7 @@ class MemoryPanel(tk.Toplevel):
         self._dataset_rows = {}
         for row in self.app.memory_datasets():
             state = "open in a window" if row["open"] else (
-                "auto-saved" if row["autosaved"] else "not saved anywhere")
+                "copy on disk" if row["autosaved"] else "only in memory")
             iid = self.datasets.insert("", "end", text=row["name"],
                                        values=(M.fmt_bytes(row["bytes"]), state))
             self._dataset_rows[iid] = row["key"]

@@ -629,13 +629,41 @@ def with_wait_cursor(widget, function, *args, **kwargs):
 # --------------------------------------------------------------------------
 # A matplotlib figure in a frame
 # --------------------------------------------------------------------------
+class _Figure(Figure):
+    """A Figure whose saved files include its animated artists.
+
+    The image panels draw the image, the cursor and the EDC / MDC as
+    animated artists, painted over a kept render (blitting), and a normal
+    render leaves animated artists out. Saving -- from Export or from the
+    toolbar's save button -- makes them ordinary for the time it takes,
+    and the window is rendered afresh afterwards."""
+
+    saving = False
+
+    def savefig(self, *args, **kwargs):
+        animated = [a for a in self.findobj() if a.get_animated()]
+        self.saving = True
+        try:
+            for artist in animated:
+                artist.set_animated(False)
+            return Figure.savefig(self, *args, **kwargs)
+        finally:
+            for artist in animated:
+                artist.set_animated(True)
+            self.saving = False
+            try:
+                self.canvas.draw_idle()
+            except Exception:                               # noqa: BLE001
+                pass
+
+
 class PlotFrame(ttk.Frame):
     """A matplotlib Figure, its Tk canvas and (optionally) the standard
     navigation toolbar (zoom / pan / home / save)."""
 
     def __init__(self, parent, figsize=(6, 4.5), toolbar=True, dpi=90):
         ttk.Frame.__init__(self, parent)
-        self.figure = Figure(figsize=figsize, dpi=dpi)
+        self.figure = _Figure(figsize=figsize, dpi=dpi)
         self.canvas = FigureCanvasTkAgg(self.figure, master=self)
         self.toolbar = None
         if toolbar:
@@ -680,6 +708,34 @@ def edges_of(axis):
     mid = 0.5 * (axis[1:] + axis[:-1])
     return np.concatenate([[axis[0] - (mid[0] - axis[0])], mid,
                            [axis[-1] + (axis[-1] - mid[-1])]])
+
+
+def display_grid(axis, cap=2048):
+    """How to show an unevenly spaced axis as an image: ``(indices,
+    (lo_edge, hi_edge))``, the sample to paint in each pixel column of an
+    even grid that covers the axis (each sample keeps its own width, as
+    pcolormesh would draw it), or None for an evenly spaced axis.
+
+    Drawing such an axis with pcolormesh colours every cell as a polygon,
+    and on matplotlib 3.3 that is several times slower than an image --
+    for a map whose deflector read-back is a little uneven, it was paid on
+    every slice. An image is also what lets a new slice just swap its
+    pixels (see ``ImagePanel._replace_image``)."""
+    axis = np.asarray(axis, dtype=float)
+    if uniform(axis):
+        return None
+    edges = edges_of(axis)
+    widths = np.diff(edges)
+    widths = widths[widths > 0]
+    span = edges[-1] - edges[0]
+    if widths.size == 0 or not span > 0:
+        return None
+    count = int(np.ceil(span / widths.min()))
+    count = max(axis.size, min(count, 4 * axis.size, max(cap, axis.size)))
+    centres = edges[0] + (np.arange(count) + 0.5) * (span / count)
+    indices = np.clip(np.searchsorted(edges, centres, side="right") - 1,
+                      0, axis.size - 1)
+    return indices, (float(edges[0]), float(edges[-1]))
 
 
 def nearest_index(axis, value):
@@ -761,6 +817,9 @@ class ImagePanel(ttk.Frame):
         self._image = None
         self._keep_view = False
         self._cursor_artists = []            # what the fast cursor path moves
+        self._grid_x = self._grid_y = None    # see display_grid
+        self._over_image = []                 # box / overlays, over the image
+        self._edc_line = self._mdc_line = None
 
         self.plot = PlotFrame(self, figsize=figsize)
         self.plot.pack(side="top", fill="both", expand=True)
@@ -784,10 +843,11 @@ class ImagePanel(ttk.Frame):
         if title:
             fig.suptitle(title, fontsize=10)
         self.plot.canvas.mpl_connect("button_press_event", self._on_click)
-        # A panel without EDC / MDC (a spatial map) moves its cursor by
-        # blitting: the rendered figure is kept, and a click only paints the
-        # two cursor lines over it -- no re-render, which over ssh -X is the
-        # slow part of a click.
+        # The image, the cursor and the EDC / MDC are animated artists: the
+        # rest of the figure (axes, ticks, labels) is rendered and kept, and
+        # a click or a new slice only paints them over it (blitting) -- no
+        # re-render, which over ssh -X is the slow part. The EDC / MDC
+        # panels are re-rendered only when a curve outgrows its limits.
         self._background = None
         self.plot.canvas.mpl_connect("draw_event", self._on_draw)
 
@@ -916,6 +976,7 @@ class ImagePanel(ttk.Frame):
         labels_same = (x_label, y_label) == (self.x_label, self.y_label)
         self.values, self.x, self.y = values, x, y
         self.x_label, self.y_label = x_label, y_label
+        self._grid_x, self._grid_y = display_grid(x), display_grid(y)
         if self.cursor is None or not keep_cursor or not self._inside(*self.cursor):
             self.cursor = (float(x[len(x) // 2]), float(y[len(y) // 2]))
         self._keep_view = keep_view and same_extent
@@ -933,16 +994,16 @@ class ImagePanel(ttk.Frame):
         if image is None or not hasattr(image, "set_data") or \
                 not hasattr(image, "get_extent"):
             return False
-        if not (uniform(self.x) and uniform(self.y)):
-            return False
         try:
             values = self.display_array()
+            if tuple(image.get_extent()) != self._extent():
+                return False
             image.set_data(values.T)
             image.set_norm(self.norm(values))
             image.set_cmap(get_cmap(self.cmap_name, self.flip))
         except Exception:                                   # noqa: BLE001
             return False
-        self._refresh_cursor(blit=False)       # the kept render is stale now
+        self._refresh_cursor()                 # the image is animated: a blit
         return True
 
     def _inside(self, cx, cy):
@@ -953,7 +1014,8 @@ class ImagePanel(ttk.Frame):
         self.cmap_name, self.flip = name, flip
         if self._image is not None:
             self._image.set_cmap(get_cmap(name, flip))
-            self.plot.draw()
+            if not self._blit():
+                self.plot.draw()
 
     def levels(self, values):
         lo_text, hi_text = self.vmin_var.get().strip(), self.vmax_var.get().strip()
@@ -980,6 +1042,8 @@ class ImagePanel(ttk.Frame):
         self.redraw()
 
     def display_array(self):
+        """What is painted: the values (smoothed if asked), on an even
+        pixel grid (see :func:`display_grid`)."""
         values = self.values
         try:
             sigma = float(self.smooth_var.get())
@@ -988,7 +1052,32 @@ class ImagePanel(ttk.Frame):
         if sigma > 0:
             from ui.data import smooth2d
             values = smooth2d(values, sigma)
+        if getattr(self, "_grid_x", None) is not None:
+            values = np.take(values, self._grid_x[0], axis=0)
+        if getattr(self, "_grid_y", None) is not None:
+            values = np.take(values, self._grid_y[0], axis=1)
         return values
+
+    def _extent(self):
+        """The image's ``(left, right, bottom, top)``."""
+        ex = self._grid_x[1] if self._grid_x is not None else \
+            tuple(edges_of(self.x)[[0, -1]])
+        ey = self._grid_y[1] if self._grid_y is not None else \
+            tuple(edges_of(self.y)[[0, -1]])
+        return (float(ex[0]), float(ex[1]), float(ey[0]), float(ey[1]))
+
+    def release(self):
+        """Forget the arrays and the drawing (a closed window)."""
+        self.values = None
+        self._image = None
+        self._background = None
+        self._cursor_artists = []
+        self._over_image = []
+        self._edc_line = self._mdc_line = None
+        try:
+            self.plot.figure.clf()
+        except Exception:                                   # noqa: BLE001
+            pass
 
     def norm(self, values):
         lo, hi = self.levels(values)
@@ -1008,15 +1097,12 @@ class ImagePanel(ttk.Frame):
         values = self.display_array()
         cmap = get_cmap(self.cmap_name, self.flip)
         norm = self.norm(values)
-        if uniform(self.x) and uniform(self.y):
-            ex, ey = edges_of(self.x), edges_of(self.y)
-            self._image = ax.imshow(values.T, origin="lower", aspect="auto",
-                                    extent=(ex[0], ex[-1], ey[0], ey[-1]),
-                                    cmap=cmap, norm=norm,
-                                    interpolation=self.interp_var.get())
-        else:
-            self._image = ax.pcolormesh(edges_of(self.x), edges_of(self.y),
-                                        values.T, cmap=cmap, norm=norm)
+        # Animated: left out of the kept render, and painted over it with
+        # the cursor (see _paint_dynamic), so a new slice is a blit.
+        self._image = ax.imshow(values.T, origin="lower", aspect="auto",
+                                extent=self._extent(), cmap=cmap, norm=norm,
+                                interpolation=self.interp_var.get(),
+                                animated=True)
         ax.set_xlabel(self.x_label, fontsize=9)
         ax.set_ylabel(self.y_label, fontsize=9)
         ax.tick_params(labelsize=8)
@@ -1027,13 +1113,18 @@ class ImagePanel(ttk.Frame):
         for tag, items in self._overlays.items():
             for kind, args, kwargs in items:
                 getattr(ax, kind)(*args, **kwargs)
+        # What lies over the image (box, overlays): painted again after
+        # the image on every blit.
+        self._over_image = [a for a in list(ax.lines) + list(ax.patches)
+                            + list(ax.collections) + list(ax.texts)
+                            if not a.get_animated()]
         if xlim is not None:
             ax.set_xlim(xlim)
             ax.set_ylim(ylim)
         else:
-            ex, ey = edges_of(self.x), edges_of(self.y)
-            ax.set_xlim(ex[0], ex[-1])
-            ax.set_ylim(ey[0], ey[-1])
+            x0, x1, y0, y1 = self._extent()
+            ax.set_xlim(x0, x1)
+            ax.set_ylim(y0, y1)
         if self.equal_var.get():
             self._equal_limits()
         self._keep_view = True
@@ -1049,6 +1140,40 @@ class ImagePanel(ttk.Frame):
             self.ax_edc.set_xlabel("EDC", fontsize=8)
         self._cursor_artists = []
         self._add_cursor_artists()
+        self._curve_limits(force=True)
+
+    def _curve_limits(self, force=False):
+        """Set the free direction of the EDC / MDC panels to fit the
+        curves. Unless ``force``, the limits are only changed when a curve
+        no longer fits or has become much smaller than its panel -- and
+        then True is returned, since the tick labels change and the figure
+        has to be rendered again; while they hold, a cursor move is a blit."""
+        if not self.curves:
+            return False
+        changed = False
+        for ax, line, vertical in ((self.ax_edc, self._edc_line, True),
+                                   (self.ax_mdc, self._mdc_line, False)):
+            if line is None:
+                continue
+            data = np.asarray(line.get_xdata() if vertical else line.get_ydata(),
+                              dtype=float)
+            data = data[np.isfinite(data)]
+            if data.size == 0:
+                continue
+            lo, hi = float(data.min()), float(data.max())
+            if not hi > lo:
+                lo, hi = lo - 0.5 * (abs(lo) + 1e-12), hi + 0.5 * (abs(hi) + 1e-12)
+            cur = ax.get_xlim() if vertical else ax.get_ylim()
+            span = cur[1] - cur[0]
+            fits = cur[0] <= lo and hi <= cur[1] and (hi - lo) >= 0.5 * span
+            if force or not fits:
+                pad = 0.05 * (hi - lo)
+                if vertical:
+                    ax.set_xlim(lo - pad, hi + pad)
+                else:
+                    ax.set_ylim(lo - pad, hi + pad)
+                changed = True
+        return changed
 
     def _add_cursor_artists(self):
         """The cursor lines, the integration bands and the EDC / MDC,
@@ -1066,25 +1191,32 @@ class ImagePanel(ttk.Frame):
         if not self.cursor_on.get():
             return
         col = self.cursor_color
-        blit = not self.curves
-        made = [self.ax.axvline(cx, color=col, lw=0.8, animated=blit),
-                self.ax.axhline(cy, color=col, lw=0.8, animated=blit)]
+        made = []
         if self.curves:
             (edc_x, edc_y, n_e), (mdc_x, mdc_y, n_m) = self.edc(), self.mdc()
-            made += self.ax_edc.plot(edc_y, edc_x, color=self.edc_color, lw=1)
-            made += self.ax_mdc.plot(mdc_x, mdc_y, color=self.mdc_color, lw=1)
             wx, wy = self.half_widths()
             if wx > 0:
-                made.append(self.ax.axvspan(cx - wx, cx + wx, color=self.edc_color, alpha=0.15))
+                made.append(self.ax.axvspan(cx - wx, cx + wx, color=self.edc_color,
+                                            alpha=0.15, animated=True))
             if wy > 0:
-                made.append(self.ax.axhspan(cy - wy, cy + wy, color=self.mdc_color, alpha=0.15))
+                made.append(self.ax.axhspan(cy - wy, cy + wy, color=self.mdc_color,
+                                            alpha=0.15, animated=True))
+        made += [self.ax.axvline(cx, color=col, lw=0.8, animated=True),
+                 self.ax.axhline(cy, color=col, lw=0.8, animated=True)]
+        if self.curves:
+            self._edc_line, = self.ax_edc.plot(edc_y, edc_x, color=self.edc_color,
+                                               lw=1, animated=True)
+            self._mdc_line, = self.ax_mdc.plot(mdc_x, mdc_y, color=self.mdc_color,
+                                               lw=1, animated=True)
+            made += [self._edc_line, self._mdc_line]
         self._cursor_artists = made
 
     def _refresh_cursor(self, blit=True):
-        """Move the cursor and redraw the EDC / MDC, leaving the image, the
-        box and the overlays as they are -- a click costs a line update,
-        not a rebuilt figure. ``blit=False`` when something else changed
-        too, so the figure has to be rendered again."""
+        """Move the cursor and redraw the EDC / MDC (and the image, which is
+        painted the same way), leaving the axes, ticks, box and overlays as
+        rendered -- a click or a new slice costs a blit, not a rebuilt
+        figure. ``blit=False`` when something else changed too, so the
+        figure has to be rendered again."""
         if self._image is None or self.values is None:
             self.redraw()
             return
@@ -1094,37 +1226,57 @@ class ImagePanel(ttk.Frame):
             except (ValueError, AttributeError, NotImplementedError):
                 pass
         self._cursor_artists = []
+        self._edc_line = self._mdc_line = None
         self._add_cursor_artists()
-        if blit and not self.curves and self._background is not None:
-            try:
-                canvas = self.plot.canvas
-                canvas.restore_region(self._background)
-                for artist in self._cursor_artists:
-                    self.ax.draw_artist(artist)
-                canvas.blit(self.plot.figure.bbox)
-                return
-            except Exception:                               # noqa: BLE001
-                self._background = None
-        if self.curves:
-            # Only the free direction of each side panel: the other one is
-            # shared with the image.
-            self.ax_edc.relim()
-            self.ax_edc.autoscale_view(scalex=True, scaley=False)
-            self.ax_mdc.relim()
-            self.ax_mdc.autoscale_view(scalex=False, scaley=True)
+        if self._curve_limits():
+            blit = False
+        if blit and self._blit():
+            return
         self.plot.draw()
 
+    def _paint_dynamic(self):
+        """Paint the animated artists -- the image, then what lies over it
+        (spines, grid, box, overlays) and the cursor with its EDC / MDC --
+        onto the current render."""
+        ax = self.ax
+        if self._image is not None:
+            ax.draw_artist(self._image)
+            for artist in self._over_image:
+                if artist.axes is ax:
+                    ax.draw_artist(artist)
+            if self.grid_var.get():
+                for line in ax.get_xgridlines() + ax.get_ygridlines():
+                    ax.draw_artist(line)
+            for spine in ax.spines.values():
+                ax.draw_artist(spine)
+        for artist in self._cursor_artists:
+            if artist.axes is not None:
+                artist.axes.draw_artist(artist)
+
+    def _blit(self):
+        """Repaint the animated artists over the kept render; False if
+        there is none to paint over (a full render is needed)."""
+        if self._background is None or self.plot.figure.saving:
+            return False
+        try:
+            canvas = self.plot.canvas
+            canvas.restore_region(self._background)
+            self._paint_dynamic()
+            canvas.blit(self.plot.figure.bbox)
+            return True
+        except Exception:                                   # noqa: BLE001
+            self._background = None
+            return False
+
     def _on_draw(self, event):
-        """After every full render: keep it (without the cursor) for
-        blitting, then paint the cursor on top."""
-        if self.curves:
+        """After every full render: keep it (without the animated artists)
+        for blitting, then paint them on top."""
+        if self.plot.figure.saving:
             return
         try:
             canvas = self.plot.canvas
             self._background = canvas.copy_from_bbox(self.plot.figure.bbox)
-            for artist in self._cursor_artists:
-                if artist.get_animated():
-                    self.ax.draw_artist(artist)
+            self._paint_dynamic()
         except Exception:                                   # noqa: BLE001
             self._background = None
 

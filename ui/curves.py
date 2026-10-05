@@ -119,11 +119,18 @@ class CurveWindow(tk.Toplevel):
         self.status.configure(text=text)
 
     def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         for window in list(self.children_windows):
             try:
                 window.destroy()
             except tk.TclError:
                 pass
+        try:
+            self.data.close()           # this window's reference to it
+        except Exception:                                  # noqa: BLE001
+            pass
         if self.app is not None:
             self.app.forget_viewer(self)
         self.destroy()

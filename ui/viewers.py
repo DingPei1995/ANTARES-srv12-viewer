@@ -292,6 +292,21 @@ class ViewerWindow(tk.Toplevel):
             self.destroy()
         except tk.TclError:
             pass
+        self.drop_arrays()
+
+    def drop_arrays(self):
+        """Let go of the arrays this window holds (its dataset, the slices
+        on screen, any copy it made), so a closed window that something
+        still points at -- a pending callback, a reference cycle -- does
+        not keep them in memory."""
+        for panel in self.image_panels():
+            try:
+                panel.release()
+            except Exception:                              # noqa: BLE001
+                pass
+        for name in ("_full", "cube", "_map"):
+            if getattr(self, name, None) is not None:
+                setattr(self, name, None)
 
     # -- shared analysis entry points (implemented in ui.analysis) ------------------------
     def open_fermi_fit(self):
@@ -728,6 +743,7 @@ class MapCutWindow(ViewerWindow):
             self.destroy()
         except tk.TclError:
             pass
+        self.drop_arrays()
 
     def image_panels(self):
         return (self.panel,)
@@ -934,10 +950,34 @@ class SpatialScanWindow(ViewerWindow):
         return out
 
 
+def ensure_in_memory(parent, data, filename=""):
+    """Read a lazily opened dataset into memory (see ``NxsData.in_memory``:
+    a spatial scan stays in its file)."""
+    in_memory = getattr(data, "in_memory", None)
+    if in_memory is None or in_memory():
+        return
+    if parent is None:
+        data.load_into_memory()
+        return
+
+    def work(report):
+        return data.read_into_memory(
+            progress=lambda done, total: report(done / float(max(1, total)),
+                                                "%d of %d" % (done, total)))
+
+    array = T.run_blocking(parent, "Reading %s into memory" % (filename or "the data"),
+                           work)
+    data.keep_in_memory(array)
+
+
 def open_viewer(app, data, filename, colormap=T.DEFAULT_COLORMAP, flip=False,
                 master=None):
     """The right viewer for a dataset, or None for a kind with nothing to
-    show."""
+    show. Anything but a spatial scan is read into memory first (once,
+    with a progress window), so that moving a slider or the cursor slices
+    a numpy array instead of reading the file again. Raises
+    :class:`ui.tkbase.JobCancelled` if that read was cancelled."""
+    ensure_in_memory(master or (app.root if app is not None else None), data, filename)
     if data.kind in ("spem_4d", "spem_1d"):
         return SpatialScanWindow(app, data, filename, colormap, flip, master)
     if data.kind == "cut":
