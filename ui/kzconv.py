@@ -159,11 +159,12 @@ class KzConversionDialog(tk.Toplevel):
     # -- preview -----------------------------------------------------------------------
     def preview_slice(self):
         v = self.form.values()
-        cube = self.contour.full_cube()
         index = T.nearest_index(self.energy, v["preview"])
         one = np.asarray([float(self.energy[index])])
+        # the one energy plane, not the whole cube as float
+        plane = np.asarray(self.contour._cube()[:, :, index], dtype=float)
         kz_axis, kpar_axis, _e, out = kzconv.to_kz_cube(
-            self.hv, self.angle, one, cube[:, :, index][:, :, None],
+            self.hv, self.angle, one, plane[:, :, None],
             n_kz=int(v["n_kz"]), n_kpar=int(v["n_kpar"]), **self.settings())
         return kz_axis, kpar_axis, out[:, :, 0]
 

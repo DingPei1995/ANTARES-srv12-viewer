@@ -35,6 +35,11 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg,     # noqa: E4
 from matplotlib import colors as mcolors                              # noqa: E402
 from matplotlib import cm as mcm                                      # noqa: E402
 
+# Every axis title here names its unit, so the tick labels are written out
+# in that unit: no "+1.234e1" offset or bare scale factor added to the axis
+# (a spatial scan in mm read "-900 ... 100" with a factor beside it).
+matplotlib.rcParams["axes.formatter.useoffset"] = False
+
 from tools import colormaps                                           # noqa: E402
 from ui import tktext                                                 # noqa: E402
 
@@ -818,6 +823,9 @@ class ImagePanel(ttk.Frame):
         self._keep_view = False
         self._cursor_artists = []            # what the fast cursor path moves
         self._grid_x = self._grid_y = None    # see display_grid
+        #: Draw the x axis decreasing left to right / the y axis increasing
+        #: downwards (see set_orientation).
+        self.invert_x = self.invert_y = False
         self._over_image = []                 # box / overlays, over the image
         self._edc_line = self._mdc_line = None
 
@@ -1000,7 +1008,9 @@ class ImagePanel(ttk.Frame):
                 return False
             image.set_data(values.T)
             image.set_norm(self.norm(values))
-            image.set_cmap(get_cmap(self.cmap_name, self.flip))
+            cmap = get_cmap(self.cmap_name, self.flip)
+            if image.get_cmap() is not cmap:        # only when it changed
+                image.set_cmap(cmap)
         except Exception:                                   # noqa: BLE001
             return False
         self._refresh_cursor()                 # the image is animated: a blit
@@ -1011,6 +1021,9 @@ class ImagePanel(ttk.Frame):
                 and self.y[0] - 1e-12 <= cy <= self.y[-1] + 1e-12)
 
     def set_colormap(self, name, flip=False):
+        if (name, flip) == (self.cmap_name, self.flip) and self._image is not None \
+                and self._image.get_cmap() is get_cmap(name, flip):
+            return                                  # already shown
         self.cmap_name, self.flip = name, flip
         if self._image is not None:
             self._image.set_cmap(get_cmap(name, flip))
@@ -1127,8 +1140,28 @@ class ImagePanel(ttk.Frame):
             ax.set_ylim(y0, y1)
         if self.equal_var.get():
             self._equal_limits()
+        self._orient()
         self._keep_view = True
         self.plot.draw()
+
+    def _orient(self):
+        """Point each axis the way :attr:`invert_x` / :attr:`invert_y` say,
+        keeping the range shown."""
+        x0, x1 = sorted(self.ax.get_xlim())
+        y0, y1 = sorted(self.ax.get_ylim())
+        self.ax.set_xlim((x1, x0) if self.invert_x else (x0, x1))
+        self.ax.set_ylim((y1, y0) if self.invert_y else (y0, y1))
+
+    def set_orientation(self, invert_x=None, invert_y=None, redraw=True):
+        """Reverse the x axis (decreasing left to right) and / or the y
+        axis (increasing downwards). Only the drawing changes."""
+        if invert_x is not None:
+            self.invert_x = bool(invert_x)
+        if invert_y is not None:
+            self.invert_y = bool(invert_y)
+        if redraw and self._image is not None:
+            self._orient()
+            self.plot.draw()
 
     def _draw_cursor_and_curves(self):
         if self.curves:

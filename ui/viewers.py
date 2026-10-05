@@ -827,6 +827,14 @@ class SpatialScanWindow(ViewerWindow):
     box -> spectrum** sums the spectrum over the map's box; **Integrate box
     -> map** shows the map summed over the spectrum's (k, E) box -- pick a
     feature, see where on the sample it comes from.
+
+    The map opens the way the file's metadata says the beamline draws it
+    (``Spatial.swap_xy``, ``Spatial.invert_x`` / ``Spatial.invert_y``, see
+    ``loader.nxs_file._spatial_labels``): an ANTARES coarse scan with ST
+    across, large to small, and SZ down the side increasing downwards; a
+    fine scan with PIX across, large to small, and PIY decreasing
+    downwards. **Swap X/Y** and the **Reverse** boxes change that; each
+    axis keeps its own direction when the two are swapped.
     """
 
     def __init__(self, app, data, filename, colormap=T.DEFAULT_COLORMAP,
@@ -835,6 +843,7 @@ class SpatialScanWindow(ViewerWindow):
         self.geometry("1500x820")
         scan = data.scan
         self.labels = scan.labels
+        info = getattr(scan, "info", {}) or {}
         self.frame_label = ""
         extra = []
         if data.kind == "spem_4d":
@@ -842,6 +851,25 @@ class SpatialScanWindow(ViewerWindow):
                      ("Integrate spectrum box → map", self.integrate_frame_box),
                      ("Whole map", self.reset_map)]
         self.build_colormap_row(extra)
+
+        # The starting orientation, from the metadata; then the user's.
+        self.swap_var = tk.BooleanVar(value=bool(info.get("Spatial.swap_xy", False))
+                                      and data.kind == "spem_4d")
+        self.rev_x_var = tk.BooleanVar(value=bool(info.get("Spatial.invert_x", False)))
+        self.rev_y_var = tk.BooleanVar(value=bool(info.get("Spatial.invert_y", False)))
+        orient = ttk.Frame(self.top)
+        orient.pack(side="left", padx=(12, 0))
+        if data.kind == "spem_4d":
+            ttk.Checkbutton(orient, text="Swap X/Y", variable=self.swap_var,
+                            command=self._orientation_changed).pack(side="left")
+        ttk.Checkbutton(orient, text="Reverse %s" % self.axis_name("x"),
+                        variable=self.rev_x_var,
+                        command=self._orientation_changed).pack(side="left", padx=2)
+        if data.kind == "spem_4d":
+            ttk.Checkbutton(orient, text="Reverse %s" % self.axis_name("y"),
+                            variable=self.rev_y_var,
+                            command=self._orientation_changed).pack(side="left", padx=2)
+
         panes = ttk.Frame(self.body)
         panes.pack(fill="both", expand=True)
         self.spatial = T.ImagePanel(panes, "Spatial map", curves=False,
@@ -856,13 +884,11 @@ class SpatialScanWindow(ViewerWindow):
         if data.kind == "spem_4d":
             overview = T.with_wait_cursor(self, data.spatial_overview_computed)
             self._map = np.asarray(overview)          # (y, x)
-            self.spatial.set_data(self._map.T, scan.x, scan.y,
-                                  self.labels.get("x", "x"), self.labels.get("y", "y"))
+            self._show_map()
             self._show_frame_at(len(scan.y) // 2, len(scan.x) // 2)
         else:  # spem_1d: (x, angle) map summed over energy
             self._map = np.asarray(data.line_kmap)    # (x, k)
-            self.spatial.set_data(self._map, scan.x, scan.y,
-                                  self.labels.get("x", "x"), self.labels.get("y", "angle"))
+            self._show_map()
             self._show_frame_at_x(len(scan.x) // 2)
 
     def image_panels(self):
@@ -871,9 +897,52 @@ class SpatialScanWindow(ViewerWindow):
     def slice_label(self):
         return self.frame_label
 
+    # -- orientation -----------------------------------------------------------
+    def axis_name(self, slot):
+        """The stage name of a spatial axis ("ST", "PIX"...), from its title."""
+        label = self.labels.get(slot, slot) or slot
+        return label.split("(")[0].strip() or slot
+
+    def swapped(self):
+        return bool(self.swap_var.get()) and self.data.kind == "spem_4d"
+
+    def _show_map(self, keep_view=False):
+        """Put ``self._map`` on the spatial panel, the way the orientation
+        controls say."""
+        scan = self.data.scan
+        if self.data.kind == "spem_4d":
+            xl, yl = self.labels.get("x", "x"), self.labels.get("y", "y")
+            if self.swapped():              # data y across, data x up the side
+                self.spatial.set_orientation(self.rev_y_var.get(), self.rev_x_var.get(),
+                                             redraw=False)
+                self.spatial.set_data(self._map, scan.y, scan.x, yl, xl,
+                                      keep_view=keep_view)
+            else:
+                self.spatial.set_orientation(self.rev_x_var.get(), self.rev_y_var.get(),
+                                             redraw=False)
+                self.spatial.set_data(self._map.T, scan.x, scan.y, xl, yl,
+                                      keep_view=keep_view)
+        else:
+            self.spatial.set_orientation(self.rev_x_var.get(), False, redraw=False)
+            self.spatial.set_data(self._map, scan.x, scan.y, self.labels.get("x", "x"),
+                                  self.labels.get("y", "angle"), keep_view=keep_view)
+
+    def _orientation_changed(self):
+        self.spatial.set_box(None, redraw=False)
+        self._show_map(keep_view=False)
+
+    def _data_box_indices(self):
+        """The spatial box as ``(ix0, ix1, iy0, iy1)`` in the data's own
+        (x, y) order, whichever way round the map is shown."""
+        i0, i1, j0, j1 = self.spatial.box_indices()
+        return (j0, j1, i0, i1) if self.swapped() else (i0, i1, j0, j1)
+
+    # -- the spectrum at the cursor ---------------------------------------------
     def _pixel_moved(self, panel, x, y):
         scan = self.data.scan
         if self.data.kind == "spem_4d":
+            if self.swapped():
+                x, y = y, x
             self._show_frame_at(T.nearest_index(scan.y, y), T.nearest_index(scan.x, x))
         else:
             self._show_frame_at_x(T.nearest_index(scan.x, x))
@@ -883,7 +952,8 @@ class SpatialScanWindow(ViewerWindow):
         frame = np.asarray(self.data.frame_at(row, col), dtype=float)
         self.frame.set_data(frame, scan.k, scan.z, self.labels.get("k", "k"),
                             self.labels.get("z", "E"))
-        self.frame_label = "x=%.4g, y=%.4g" % (scan.x[col], scan.y[row])
+        self.frame_label = "%s=%.4g, %s=%.4g" % (self.axis_name("x"), scan.x[col],
+                                                 self.axis_name("y"), scan.y[row])
         self.say("pixel (%s)" % self.frame_label)
 
     def _show_frame_at_x(self, xi):
@@ -891,7 +961,7 @@ class SpatialScanWindow(ViewerWindow):
         frame = np.asarray(self.data.frame_at_x(xi), dtype=float)
         self.frame.set_data(frame, scan.y, scan.z, self.labels.get("y", "k"),
                             self.labels.get("z", "E"))
-        self.frame_label = "x=%.4g" % scan.x[xi]
+        self.frame_label = "%s=%.4g" % (self.axis_name("x"), scan.x[xi])
         self.say(self.frame_label)
 
     def integrate_spatial_box(self):
@@ -900,20 +970,20 @@ class SpatialScanWindow(ViewerWindow):
                    "(type x0 x1 y0 y1 under it, or zoom and press 'From zoom').")
             return
         scan = self.data.scan
-        ix0, ix1, iy0, iy1 = self.spatial.box_indices()
+        ix0, ix1, iy0, iy1 = self._data_box_indices()
         frame = T.with_wait_cursor(self, self.data.frame_over_region,
                                    slice(iy0, iy1 + 1), slice(ix0, ix1 + 1))
         self.frame.set_data(frame, scan.k, scan.z, self.labels.get("k", "k"),
                             self.labels.get("z", "E"))
-        self.frame_label = "x[%.4g..%.4g], y[%.4g..%.4g] integrated" % (
-            scan.x[ix0], scan.x[ix1], scan.y[iy0], scan.y[iy1])
+        self.frame_label = "%s[%.4g..%.4g], %s[%.4g..%.4g] integrated" % (
+            self.axis_name("x"), scan.x[ix0], scan.x[ix1],
+            self.axis_name("y"), scan.y[iy0], scan.y[iy1])
         self.say("Spectrum integrated over " + self.frame_label)
 
     def integrate_frame_box(self):
         if self.frame.box is None:
             T.info(self, "Integrate", "Set a box on the spectrum first.")
             return
-        scan = self.data.scan
         ik0, ik1, ie0, ie1 = self.frame.box_indices()
 
         def work(report):
@@ -926,15 +996,12 @@ class SpatialScanWindow(ViewerWindow):
         except T.JobCancelled:
             return
         self._map = np.asarray(smap)
-        self.spatial.set_data(self._map.T, scan.x, scan.y, self.labels.get("x", "x"),
-                              self.labels.get("y", "y"))
+        self._show_map(keep_view=True)
         self.say("Map integrated over the spectrum's box")
 
     def reset_map(self):
-        scan = self.data.scan
         self._map = np.asarray(self.data.spatial_overview_computed())
-        self.spatial.set_data(self._map.T, scan.x, scan.y, self.labels.get("x", "x"),
-                              self.labels.get("y", "y"))
+        self._show_map(keep_view=True)
 
     def exportable_panels(self):
         scan = self.data.scan
@@ -955,6 +1022,9 @@ def ensure_in_memory(parent, data, filename=""):
     a spatial scan stays in its file)."""
     in_memory = getattr(data, "in_memory", None)
     if in_memory is None or in_memory():
+        return
+    if not data.fits_in_memory():
+        # too big to hold: sliced from the file, as before
         return
     if parent is None:
         data.load_into_memory()

@@ -268,6 +268,28 @@ class NxsData:
         return value is None or (isinstance(value, np.ndarray)
                                  and not isinstance(value, np.memmap))
 
+    #: Never read a dataset whole above this, whatever memory is free.
+    MAX_IN_MEMORY_BYTES = 4 * 1024 ** 3
+
+    def fits_in_memory(self):
+        """Whether reading the whole array is reasonable: at most half of
+        the memory the server has available, and at most
+        :data:`MAX_IN_MEMORY_BYTES`. A bigger one stays in its file and is
+        sliced from there, as before (through the reader's chunk cache)."""
+        value = self.scan.value
+        size = getattr(value, "nbytes", None)
+        if size is None:
+            return True
+        limit = self.MAX_IN_MEMORY_BYTES
+        try:
+            from tools import memory as M
+            available = M.system_memory().get("available")
+            if available:
+                limit = min(limit, available // 2)
+        except Exception:                                   # noqa: BLE001
+            pass
+        return int(size) <= limit
+
     def read_into_memory(self, progress=None):
         """The whole array, read from the file (``progress(done, total)``).
         Safe to run on a worker thread; hand the result to

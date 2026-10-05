@@ -41,6 +41,17 @@ with `ssh -X` / `ssh -Y`, or use VNC / NoMachine).
 > 窗口即释放其占用的内存（数据数组、副本、图像，并做 gc 与 malloc_trim）。
 > (4) 本版本**不再自动保存**计算结果（服务器磁盘空间不足）：计算结果只在内存中，
 > 需要保留的请用 **Save...** 保存；关闭程序时仍会提示未保存的结果。
+>
+> ANTARES 空间扫描坐标轴：(1) 能识别文件里真实的执行器名称（Tango 属性，如
+> `i12-m-cx1/ex/sample-mt_sz/position`、`i12-m-cx1/ex/pi/x`），轴标题直接写
+> "ST (mm)"、"SZ (mm)"、"PIX (µm)"、"PIY (µm)"（以前 piezo 扫描被误标为 mm），
+> 光标读数写成 `SZ=40.1, ST=-0.35`；(2) 打开时按光束线习惯的方向显示：粗扫描
+> ST 横向、从大到小，SZ 纵向、向下增大（文件里 SZ 在前，所以自动交换 X/Y）；
+> 精扫描 PIX 横向、从大到小，PIY 向下减小。这只是初始状态，窗口顶部的
+> **Swap X/Y** 和 **Reverse ...** 可随时更改，交换时每个轴保留自己的方向；
+> (3) 所有坐标轴的刻度不再加偏移量或比例因子，直接按标题中的单位显示。
+> 另外：超过可用内存一半（最多 4 GB）的 map 不整体读入，仍从文件切片；kz 转换
+> 预览只读一个能量面；colormap 未改变时不再重复设置。
 
 ---
 
@@ -251,6 +262,26 @@ reads only its structure. The image panels draw the image, the cursor and
 the EDC / MDC over a kept render of the axes (blitting), map unevenly spaced
 axes onto an even pixel grid instead of using `pcolormesh`, and re-render
 the whole figure only when the axes change.
+
+## ANTARES spatial axes
+
+ANTARES records the Tango attribute of each scanned stage
+(`i12-m-cx1/ex/sample-mt_sz/position`, `.../sample-mt_st/position`,
+`i12-m-cx1/ex/pi/x`, `.../pi/y`). The loader reads the stage off the end of
+the name (`_antares_stage`) and titles the axes "ST (mm)", "SZ (mm)",
+"PIX (µm)", "PIY (µm)" (anything else stays "X" / "Y" with its unit); the
+pixel readout says `SZ=40.1, ST=-0.35`. The data keep the file's order; the
+metadata (`Spatial.swap_xy`, `Spatial.invert_x`, `Spatial.invert_y`) makes
+the viewer open the way the beamline draws a scan: coarse scans with ST
+across, large to small, and SZ down the side increasing downwards (they
+record SZ first, so X/Y are swapped); fine scans with PIX across, large to
+small, and PIY decreasing downwards. **Swap X/Y** and the **Reverse** boxes
+at the top of the window change that; each axis keeps its direction when
+swapped. No axis in the program adds an offset or a scale factor to its
+tick labels: they are in the unit the title names.
+
+A map larger than half the server's available memory (at most 4 GB) is not
+read whole; it is sliced from its file as before.
 
 ## Speed of SPEM (spatial) scans
 
