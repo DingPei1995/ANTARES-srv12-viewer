@@ -123,20 +123,69 @@ COLORMAP_NAMES = colormaps.COLORMAP_NAMES
 DEFAULT_COLORMAP = "gray"
 
 
+#: Entries in the lookup table handed to an image. pyqtgraph's own gradient
+#: path sampled colormaps at 512 points for float images; matching that keeps
+#: the 101-stop tables from banding.
+_LUT_SIZE = 512
+_RGBA_LUTS = {}
+
+
+def colormap_rgba(name: str, flip: bool = False) -> np.ndarray:
+    """``(512, 4)`` uint8 RGBA lookup table for a named colormap, built once
+    per (name, flip) and then reused by every view."""
+    key = (name, bool(flip))
+    lut = _RGBA_LUTS.get(key)
+    if lut is None:
+        rgb = np.asarray(colormaps.get_lut(name, flip=flip), dtype=float)
+        src = np.linspace(0.0, 1.0, len(rgb))
+        dst = np.linspace(0.0, 1.0, _LUT_SIZE)
+        lut = np.empty((_LUT_SIZE, 4), dtype=np.uint8)
+        for channel in range(3):
+            lut[:, channel] = np.rint(np.interp(dst, src, rgb[:, channel]))
+        lut[:, 3] = 255
+        lut.flags.writeable = False
+        _RGBA_LUTS[key] = lut
+    return lut
+
+
+def detach_hidden_histogram(view) -> None:
+    """Stop a ``pg.ImageView``'s hidden histogram recomputing on every image.
+
+    Every panel here hides the ImageView's own histogram (the LevelBar does
+    its job), but pyqtgraph still recomputes it and redraws its curve on
+    every ``setImage`` -- per slider step, for a widget no one can see. The
+    levels keep flowing through it (``setLevels`` drives its region), so
+    only the histogram refresh is cut.
+    """
+    try:
+        view.getImageItem().sigImageChanged.disconnect(view.ui.histogram.imageChanged)
+    except (TypeError, RuntimeError, AttributeError):
+        pass
+
+
 def apply_colormap(view, name: str, flip: bool = False) -> bool:
     """Apply a named colormap (see ``colormaps.COLORMAP_NAMES``) to any
     pg.ImageView-based widget, optionally reversed. Returns False silently
     if the name is unknown or this pyqtgraph version rejects it, so callers
-    can fire-and-forget across several views."""
+    can fire-and-forget across several views.
+
+    The table goes straight onto the ImageItem rather than through
+    ``ImageView.setColorMap``: that path rebuilds the hidden gradient editor
+    with one tick item per colour stop (256 for jet) and re-renders twice,
+    tens of milliseconds that every slice refresh used to pay because the
+    viewers re-apply the colormap after each new frame. Re-applying the
+    colormap a view already has is now a no-op.
+    """
     try:
-        lut = colormaps.get_lut(name, flip=flip)
-        positions = np.linspace(0.0, 1.0, len(lut))
-        colors = np.column_stack([lut, np.full(len(lut), 255, dtype=np.uint8)])
-        view.setColorMap(pg.ColorMap(positions, colors))
+        key = (name, bool(flip))
+        item = view.getImageItem()
+        if getattr(view, "_applied_lut", None) == key and item.lut is not None:
+            return True
+        item.setLookupTable(colormap_rgba(name, flip))
         # Remembered so an export can re-create exactly this colouring at a
-        # different pixel size; pyqtgraph keeps the ColorMap but not the name
-        # it came from, and the export needs the table, not the widget.
+        # different pixel size; the export needs the table, not the widget.
         view._colormap_name, view._colormap_flip = name, bool(flip)
+        view._applied_lut = key
         return True
     except Exception:
         return False
@@ -165,6 +214,7 @@ def plain_image_view(x_label: str = "", y_label: str = "") -> pg.ImageView:
     view.ui.roiBtn.hide()
     view.ui.menuBtn.hide()
     view.ui.histogram.hide()
+    detach_hidden_histogram(view)
     strip_stock_menu(view.view)
     view.view.invertY(False)
     view.view.setAspectLocked(False)
@@ -622,6 +672,56 @@ def _options_key(options):
     return None if key == (None, None, "angle", "") else key
 
 
+#: Ceiling on how much a viewer reads into memory when it opens a dataset;
+#: also never more than half the RAM free at the time (see
+#: :func:`in_memory_limit_bytes`). Above it the data stay on disk and are
+#: read slice by slice, as before.
+IN_MEMORY_MAX_BYTES = 6 * 1024 ** 3
+
+
+def _available_ram_bytes():
+    """Physical memory currently free, or None if it cannot be found out."""
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:                                       # noqa: BLE001
+        pass
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            class _Status(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            status = _Status()
+            status.dwLength = ctypes.sizeof(_Status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullAvailPhys)
+        except Exception:                                   # noqa: BLE001
+            return None
+        return None
+    try:
+        return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def in_memory_limit_bytes() -> int:
+    """The most a dataset may occupy and still be read into memory."""
+    free = _available_ram_bytes()
+    if free is None:
+        return 2 * 1024 ** 3
+    return int(min(IN_MEMORY_MAX_BYTES, free // 2))
+
+
 class NxsData:
     """Loads one data file through the loader registry (:mod:`loader.registry`)
     and exposes the GUI-friendly derived views on top of it. ``self.scan`` is
@@ -709,6 +809,16 @@ class NxsData:
                     return False
         return self._refs > 0
 
+    def lazy_nbytes(self) -> int:
+        """Bytes of this dataset still read from its file on demand."""
+        return self.scan.lazy_nbytes()
+
+    def load_into_memory(self, progress=None) -> bool:
+        """Read the whole dataset into memory (see
+        :meth:`loader.nxs_file.NxsScan.load_into_memory`). Shared by every
+        window on this dataset, so it is paid once."""
+        return self.scan.load_into_memory(progress)
+
     def close(self):
         """Release one reference; the file closes when the last one goes."""
         self._refs -= 1
@@ -780,6 +890,8 @@ class NxsData:
         """(y, x) map, summed over (k, E). Uses the file's reduced preview
         cube when it checks out, and otherwise streams the real cube."""
         assert self.kind == "spem_4d"
+        if self._overview is None and isinstance(self.scan.value4d, np.ndarray):
+            self._overview = self.scan.value4d.sum(axis=(2, 3), dtype=np.float64)
         if self._overview is None:
             overview = self._overview_from_preview()
             if overview is None:
@@ -1001,6 +1113,12 @@ class MemoryData:
     def close(self):
         pass
 
+    def lazy_nbytes(self) -> int:
+        return self.scan.lazy_nbytes() if hasattr(self.scan, "lazy_nbytes") else 0
+
+    def load_into_memory(self, progress=None) -> bool:
+        return False
+
     def retain(self):
         """Nothing to count for an in-memory dataset; see NxsData.retain."""
         return self
@@ -1071,6 +1189,7 @@ class _InteractiveImageBase(pg.ImageView):
         # The panel's LevelBar replaces this: same job, far less screen space,
         # and no intensity distribution to draw.
         self.ui.histogram.hide()
+        detach_hidden_histogram(self)
         self.view.invertY(False)
 
         self.x_label = None   # remembered axis titles (units included)
@@ -2185,6 +2304,15 @@ class SpatialImageView(_InteractiveImageBase):
         self.pixelChanged.emit(row, col)
 
 
+def _same_axis(a, b) -> bool:
+    """Whether two axis vectors are the same values (cheap when they are
+    the same object, which is the common case)."""
+    if a is b:
+        return True
+    a, b = np.asarray(a), np.asarray(b)
+    return a.shape == b.shape and np.array_equal(a, b)
+
+
 class FrameImageView(_InteractiveImageBase):
     """2D frame display (E vs k, constant-E map, ...). Aspect starts
     unlocked, because the two axes usually carry unrelated physical units
@@ -2202,10 +2330,16 @@ class FrameImageView(_InteractiveImageBase):
         with x_axis horizontal, y_axis vertical (transposed for row-major
         rendering). ``last_frame`` keeps the *raw* array, so smoothing stays
         a display effect and exports write unsmoothed data."""
+        # Re-fit only when the axes change. A new slice of the same cube
+        # (every slider step) lands on the same extent, and re-fitting it
+        # cost a relayout per step and threw away the user's zoom.
+        same_axes = (self._xarray is not None and self._yarray is not None
+                     and _same_axis(self._xarray, x_axis)
+                     and _same_axis(self._yarray, y_axis))
         self._last_frame = frame
         self._store_axes(x_axis, y_axis)
         self._value_lookup = lambda ix, iy: self._last_frame[ix, iy]
-        self._render(auto_range=True)
+        self._render(auto_range=not same_axes)
         # The cursor stays put; what is under it has changed.
         self.refresh_readout_text()
 

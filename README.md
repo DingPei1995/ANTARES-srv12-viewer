@@ -632,6 +632,15 @@ CASSIOPEE folder: all of it runs on a worker thread with a progress bar that
 moves and a Cancel that works. One job at a time, because HDF5 here is not
 thread-safe. A job that finishes within 400 ms never shows a dialog.
 
+**Opening a viewer reads the data into memory.** Selecting a row only reads
+metadata and leaves the arrays on disk, but a viewer slices the same data on
+every slider step and cursor move, so a map, cut, line scan or spatial scan
+is read whole when its window opens (one pass through the file, with a
+progress bar above ~50 MB) and the file is released. Every later slice is
+plain numpy indexing instead of a disk read plus HDF5 decompression. A
+dataset larger than half the free RAM (or 6 GB) stays on disk and is read
+slice by slice as before; a cancelled read does the same.
+
 ---
 
 ## Adding a beamline

@@ -546,6 +546,45 @@ class LazyArray:
         return f"LazyArray(shape={self.shape}, dtype={self.dtype})"
 
 
+#: How much of a lazy array is read per block when it is brought into
+#: memory: large enough that HDF5 decompresses whole chunks in few calls,
+#: small enough that progress moves and Cancel answers promptly.
+_READ_BLOCK_BYTES = 32 * 1024 ** 2
+
+
+def read_lazy(lazy, progress=None):
+    """Read a :class:`LazyCube` or :class:`LazyArray` whole, in blocks along
+    the dataset's own first axis, and return the numpy array in the lazy
+    object's axis order.
+
+    Reading the dataset front to back is the cheapest order HDF5 has: every
+    compressed chunk is inflated exactly once. Slicing a lazy cube along its
+    energy axis instead inflates every chunk of the file for one plane --
+    which is what each step of a map's energy slider used to cost.
+
+    ``progress(done, total)`` is called after each block; it may raise to
+    abandon the read.
+    """
+    dset = lazy._dset
+    shape = tuple(dset.shape)
+    out = np.empty(shape, dtype=dset.dtype)
+    if not shape or out.size == 0:
+        return np.asarray(dset[()]) if not shape else (
+            np.transpose(out, lazy._perm) if isinstance(lazy, LazyCube) else out)
+    row_bytes = max(1, out.nbytes // shape[0])
+    step = max(1, _READ_BLOCK_BYTES // row_bytes)
+    for start in range(0, shape[0], step):
+        stop = min(shape[0], start + step)
+        dset.read_direct(out, np.s_[start:stop], np.s_[start:stop])
+        if progress is not None:
+            progress(stop, shape[0])
+    if isinstance(lazy, LazyCube):
+        # A view, not a copy: the transposed array indexes exactly like the
+        # LazyCube did, and a gigabyte cube is not held twice.
+        return np.transpose(out, lazy._perm)
+    return out
+
+
 def align_and_transpose(arr: np.ndarray, axis_lengths: "dict[str, int]", order: "list[str]") -> np.ndarray:
     """Reorder ``arr``'s axes to match ``order`` by matching each named
     axis's expected length (``axis_lengths[name]``) against ``arr.shape``.
@@ -743,6 +782,58 @@ class NxsScan:
         if self.kind == "spem_4d" and self.value4d is not None:
             return self.value4d
         return self.value
+
+    def lazy_arrays(self) -> "list[tuple[str, object]]":
+        """``(attribute, lazy array)`` for every array of this scan still
+        reading from its file; each array appears once even when two
+        attributes share it."""
+        seen, found = set(), []
+        for attr in ("value", "value4d"):
+            arr = getattr(self, attr, None)
+            if isinstance(arr, (LazyCube, LazyArray)) and id(arr) not in seen:
+                seen.add(id(arr))
+                found.append((attr, arr))
+        return found
+
+    def lazy_nbytes(self) -> int:
+        """Bytes still on disk behind lazy arrays (0 once fully in memory)."""
+        return sum(int(arr.nbytes) for _attr, arr in self.lazy_arrays())
+
+    def load_into_memory(self, progress=None) -> bool:
+        """Read every lazy array into memory and let go of the file.
+
+        A viewer slices the same data over and over -- every slider step,
+        every cursor move -- and from the file each of those slices pays
+        for a disk (often network) read and for decompressing every HDF5
+        chunk it touches. Read once, they are plain numpy indexing.
+
+        ``progress(done, total)`` counts bytes; it may raise (a Cancel) to
+        abandon the read, in which case the scan is left lazy and intact.
+        Returns True if anything was read.
+        """
+        lazy = self.lazy_arrays()
+        if not lazy:
+            return False
+        total = sum(int(arr.nbytes) for _attr, arr in lazy)
+        loaded, done = {}, 0
+        for _attr, arr in lazy:
+            size = int(arr.nbytes)
+
+            def report(rows_done, rows_total, base=done, size=size):
+                if progress is not None:
+                    progress(base + size * rows_done // max(1, rows_total), total)
+
+            loaded[id(arr)] = read_lazy(arr, report)
+            done += size
+        for attr in ("value", "value4d"):
+            arr = getattr(self, attr, None)
+            if id(arr) in loaded:
+                setattr(self, attr, loaded[id(arr)])
+        # The previews are unread datasets in the file about to be released;
+        # the overview now comes from the cube itself, which is in memory.
+        self.previews = {}
+        self.close()
+        return True
 
     def close(self):
         """Release this scan's claim on the file. Safe to call more than

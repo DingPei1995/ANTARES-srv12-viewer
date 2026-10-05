@@ -5443,9 +5443,58 @@ class DataOperationsDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+#: Below this a dataset is read straight away on the GUI thread; the
+#: progress dialog would only flash.
+_QUIET_READ_BYTES = 48 * 1024 ** 2
+
+
+def bring_into_memory(data, filename: str = "") -> bool:
+    """Read a file-backed dataset whole before a viewer is built on it.
+
+    Selecting a row in the list stays lazy -- that only needs metadata --
+    but a viewer slices the same data on every slider step and cursor move,
+    and from the file each of those slices is a disk read plus the
+    decompression of every chunk it crosses. That was the lag in a map's
+    energy slider. Read once here, every later slice is plain numpy.
+
+    Large reads run on the worker thread with a progress bar and a Cancel;
+    a cancelled or failed read leaves the dataset lazy, which still works,
+    just as slowly as before. A dataset larger than
+    :func:`ui.widgets.in_memory_limit_bytes` is left on disk.
+    """
+    from ui import jobs
+    from ui.widgets import in_memory_limit_bytes
+
+    pending = getattr(data, "lazy_nbytes", lambda: 0)()
+    if not pending or pending > in_memory_limit_bytes():
+        return False
+    if jobs.busy() and pending > _QUIET_READ_BYTES:
+        return False        # one job at a time; this one can stay lazy
+    if pending <= _QUIET_READ_BYTES:
+        try:
+            return data.load_into_memory()
+        except Exception:                                   # noqa: BLE001
+            return False
+
+    megabytes = pending / 1024 ** 2
+
+    def work(report):
+        return data.load_into_memory(
+            lambda done, total: report(done / max(1, total),
+                                       f"{done / 1024 ** 2:.0f} of {megabytes:.0f} MB"))
+
+    try:
+        return bool(jobs.run_blocking(
+            None, f"Reading {filename or 'dataset'} into memory", work))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def open_viewer(data, filename: str, colormap: str, flip: bool):
     """Build the right viewer for a loaded file, or return None for kinds
     that have nothing to show."""
+    if data.kind in ("spem_4d", "spem_1d", "cut") or data.kind in CUBE_KINDS:
+        bring_into_memory(data, filename)
     if data.kind in ("spem_4d", "spem_1d"):
         return SpatialScanWindow(data, filename, colormap, flip)
     if data.kind == "cut":
